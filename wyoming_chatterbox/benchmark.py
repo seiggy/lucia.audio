@@ -163,6 +163,20 @@ async def run_comparative_benchmark(
                 ))
                 continue
 
+        # Warm up with a throwaway synthesis (don't count this)
+        _LOGGER.info("Warm-up run for %s...", engine.ENGINE_NAME)
+        try:
+            await engine.synthesize(
+                text="Warming up audio engine, please wait.",
+                voice_conds_path=conds_path,
+                audio_prompt_path=audio_prompt,
+            )
+        except Exception as e:
+            _LOGGER.warning("Warm-up failed for %s (non-fatal): %s", engine.ENGINE_NAME, e)
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         result = await run_single_benchmark(
             engine, text,
             voice_conds_path=conds_path,

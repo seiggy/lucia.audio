@@ -47,14 +47,20 @@ class EngineManager:
             self._engine_states[Qwen3Engine.ENGINE_ID] = STATE_UNLOADED
 
     async def load_all(self) -> None:
-        """Load all configured engines."""
+        """Load all configured engines with warm-up."""
         for engine_id, engine in self.engines.items():
             try:
                 self._engine_states[engine_id] = STATE_LOADING
                 _LOGGER.info("Loading engine: %s", engine_id)
                 await engine.load_model()
+                # Warm up so first real request is fast
+                _LOGGER.info("Warming up %s...", engine_id)
+                try:
+                    await engine.synthesize(text="Warming up audio engine, please wait.")
+                except Exception as e:
+                    _LOGGER.warning("Warm-up for %s failed (non-fatal): %s", engine_id, e)
                 self._engine_states[engine_id] = STATE_READY
-                _LOGGER.info("Engine loaded: %s", engine_id)
+                _LOGGER.info("Engine ready: %s", engine_id)
             except Exception as e:
                 self._engine_states[engine_id] = STATE_ERROR
                 _LOGGER.error("Failed to load engine %s: %s", engine_id, e)
@@ -86,6 +92,12 @@ class EngineManager:
             self._engine_states[engine_id] = STATE_LOADING
             try:
                 await new_engine.load_model()
+                # Warm up with a throwaway synthesis so first real request is fast
+                _LOGGER.info("Warming up %s...", engine_id)
+                try:
+                    await new_engine.synthesize(text="Warming up audio engine, please wait.")
+                except Exception as e:
+                    _LOGGER.warning("Warm-up synthesis failed (non-fatal): %s", e)
                 self._engine_states[engine_id] = STATE_READY
                 self._active_engine_id = engine_id
                 _LOGGER.info("Engine activated: %s", engine_id)
