@@ -2,6 +2,8 @@
 
 import io
 import logging
+import subprocess
+import tempfile
 import wave
 from pathlib import Path
 from typing import Optional
@@ -87,9 +89,18 @@ def create_app(
         if len(audio_data) < 1000:
             raise HTTPException(400, "Audio file too small")
 
-        # Validate it's a valid WAV or convert
+        # Convert non-WAV formats (MP3, OGG, etc.) to WAV via ffmpeg
+        filename = (audio.filename or "").lower()
+        if not filename.endswith(".wav"):
+            try:
+                audio_data = _convert_to_wav(audio_data)
+            except Exception as e:
+                _LOGGER.error("Audio conversion failed: %s", e)
+                raise HTTPException(400, f"Failed to convert audio to WAV: {e}")
+
+        # Validate duration
         if not _is_valid_audio(audio_data):
-            raise HTTPException(400, "Invalid audio file. Please upload a WAV file (at least 5 seconds).")
+            raise HTTPException(400, "Audio too short. Please upload at least 5 seconds of audio.")
 
         exaggeration = max(0.0, min(1.0, exaggeration))
 
@@ -282,6 +293,32 @@ def _update_wyoming_voices(wyoming_info: Info, voice_manager: VoiceManager) -> N
         )
     if wyoming_info.tts:
         wyoming_info.tts[0].voices = sorted(voices, key=lambda v: v.name)
+
+
+def _convert_to_wav(audio_data: bytes) -> bytes:
+    """Convert any audio format to 16-bit mono WAV using ffmpeg."""
+    with tempfile.NamedTemporaryFile(suffix=".input", delete=True) as infile, \
+         tempfile.NamedTemporaryFile(suffix=".wav", delete=True) as outfile:
+        infile.write(audio_data)
+        infile.flush()
+
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", infile.name,
+                "-ac", "1",           # mono
+                "-ar", "44100",       # 44.1kHz (will be resampled by engines as needed)
+                "-sample_fmt", "s16", # 16-bit
+                "-f", "wav",
+                outfile.name,
+            ],
+            capture_output=True, timeout=30,
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")[:500]
+            raise RuntimeError(f"ffmpeg failed: {stderr}")
+
+        return Path(outfile.name).read_bytes()
 
 
 def _is_valid_audio(data: bytes) -> bool:
