@@ -319,6 +319,12 @@ function updateEngineUI(activeId) {
     const badge = document.getElementById('engine-status-badge');
     badge.textContent = 'ready';
     badge.dataset.state = 'ready';
+
+    // Show upload button directly for Qwen3 (no audition needed)
+    const uploadBtn = document.getElementById('upload-btn');
+    if (uploadBtn) {
+        uploadBtn.style.display = (activeId === 'qwen3') ? '' : 'none';
+    }
 }
 
 async function activateEngine(engineId) {
@@ -464,7 +470,7 @@ function renderWizardResults(results, container, values) {
                 <span class="audition-sample-label">${r.exaggeration.toFixed(2)}</span>
                 <span class="audition-sample-desc">${getExagDescription(r.exaggeration)}</span>
                 <audio controls src="data:audio/wav;base64,${r.audio_b64}" preload="none"></audio>
-                <button class="btn btn-sm" style="flex-shrink:0">${canRefine ? '→ Refine' : '✓ Use This'}</button>
+                <button type="button" class="btn btn-sm" style="flex-shrink:0">${canRefine ? '→ Refine' : '✓ Use This'}</button>
             `;
             const pickBtn = div.querySelector('button');
             pickBtn.addEventListener('click', () => {
@@ -509,7 +515,7 @@ function refineAround(center, prevValues) {
 function finalizeExaggeration(value) {
     selectedExaggeration = value;
     document.getElementById('voice-exaggeration').value = value;
-    // Highlight selection and show confirmation
+    // Highlight selection
     document.querySelectorAll('.audition-sample').forEach(el => {
         el.classList.remove('selected');
         const label = el.querySelector('.audition-sample-label');
@@ -517,6 +523,9 @@ function finalizeExaggeration(value) {
             el.classList.add('selected');
         }
     });
+    // Show upload button
+    document.getElementById('upload-btn').style.display = '';
+    // Show confirmation banner
     const resultsDiv = document.getElementById('audition-results');
     let banner = document.getElementById('audition-done');
     if (!banner) {
