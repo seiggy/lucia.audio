@@ -1,0 +1,34 @@
+services:
+  lucia-tts:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lucia-tts
+    restart: unless-stopped
+    ports:
+      - "10200:10200"  # Wyoming protocol
+      - "8095:8095"    # Dashboard
+    volumes:
+      - lucia-data:/data
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HOME=/data/hf-cache
+      - HF_TOKEN=${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Override CMD for custom settings:
+    # command: >
+    #   --uri tcp://0.0.0.0:10200
+    #   --voices-dir /data/voices
+    #   --dashboard-port 8095
+    #   --default-voice "Lucia"
+    #   --zeroconf
+
+volumes:
+  lucia-data:
+    driver: local

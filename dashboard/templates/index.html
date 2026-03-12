@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lucia.Audio — Voice Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <header>
+        <div class="header-content">
+            <h1>🎙️ Lucia.Audio</h1>
+            <span class="subtitle">Chatterbox Turbo TTS • Wyoming Protocol</span>
+        </div>
+    </header>
+
+    <main>
+        <!-- Upload Section -->
+        <section class="card upload-section">
+            <h2>Add Voice Profile</h2>
+            <p class="hint">Upload a WAV audio clip (5+ seconds) to create a new voice profile for TTS.</p>
+            <form id="upload-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="voice-name">Voice Name</label>
+                        <input type="text" id="voice-name" name="name" placeholder="e.g. Lucia" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="voice-desc">Description</label>
+                        <input type="text" id="voice-desc" name="description" placeholder="Optional description">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="voice-audio">Reference Audio (WAV, 5+ seconds)</label>
+                    <div class="file-input-wrapper">
+                        <input type="file" id="voice-audio" name="audio" accept="audio/wav,audio/wave,.wav" required>
+                        <div class="file-input-label" id="file-label">Choose WAV file...</div>
+                    </div>
+                    <audio id="upload-preview" controls style="display:none; margin-top: 0.5rem; width: 100%;"></audio>
+                </div>
+                <button type="submit" class="btn btn-primary" id="upload-btn">
+                    <span class="btn-text">Upload & Process Voice</span>
+                    <span class="btn-loading" style="display:none;">Processing... (this may take a moment)</span>
+                </button>
+            </form>
+        </section>
+
+        <!-- Voice Profiles -->
+        <section class="card">
+            <h2>Voice Profiles</h2>
+            <div id="voices-list" class="voices-grid">
+                {% for profile in profiles %}
+                <div class="voice-card" data-id="{{ profile.id }}">
+                    <div class="voice-info">
+                        <h3>{{ profile.name }}</h3>
+                        <p class="voice-desc">{{ profile.description or 'No description' }}</p>
+                        <span class="voice-status {{ 'ready' if profile.is_ready else 'pending' }}">
+                            {{ '✓ Ready' if profile.is_ready else '⏳ Processing' }}
+                        </span>
+                        <span class="voice-id">ID: {{ profile.id }}</span>
+                    </div>
+                    <div class="voice-actions">
+                        <button class="btn btn-sm btn-listen" onclick="playVoiceRef('{{ profile.id }}')" title="Listen to reference">
+                            🔊
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteVoice('{{ profile.id }}', '{{ profile.name }}')" title="Delete">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+                {% if not profiles %}
+                <div class="empty-state">
+                    <p>No voice profiles yet. Upload an audio clip above to get started!</p>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+
+        <!-- TTS Test -->
+        <section class="card">
+            <h2>Test TTS</h2>
+            <form id="tts-form">
+                <div class="form-group">
+                    <label for="tts-voice">Voice</label>
+                    <select id="tts-voice" name="voice_id">
+                        <option value="">Default</option>
+                        {% for profile in profiles %}
+                        {% if profile.is_ready %}
+                        <option value="{{ profile.id }}">{{ profile.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="tts-text">Text to Speak</label>
+                    <textarea id="tts-text" name="text" rows="3" placeholder="Enter text to synthesize..." required>Hello! This is a test of the Chatterbox Turbo text to speech system.</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" id="tts-btn">
+                    <span class="btn-text">🔊 Synthesize</span>
+                    <span class="btn-loading" style="display:none;">Generating audio...</span>
+                </button>
+                <div id="tts-result" style="display:none; margin-top: 1rem;">
+                    <audio id="tts-audio" controls style="width: 100%;"></audio>
+                    <p class="tts-timing" id="tts-timing"></p>
+                </div>
+            </form>
+        </section>
+    </main>
+
+    <footer>
+        <p>Lucia.Audio v{{ version }} • Powered by <a href="https://github.com/resemble-ai/chatterbox" target="_blank">Chatterbox Turbo</a> • <a href="https://www.home-assistant.io/integrations/wyoming/" target="_blank">Wyoming Protocol</a></p>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
