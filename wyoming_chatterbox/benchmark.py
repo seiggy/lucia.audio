@@ -64,79 +64,41 @@ def _wav_duration(wav_bytes: bytes) -> tuple[float, int]:
 
 
 async def _run_sample(engine, text, voice_conds_path, audio_prompt_path) -> SampleResult:
-    """Run a single synthesis sample, using streaming to measure TTFA."""
-    from .tts_engine import audio_to_wav_bytes
+    """Run a single synthesis sample and capture timing.
 
+    Uses non-streaming synthesis (streaming chunk decode has alignment issues
+    with Chatterbox's S3Gen CFM decoder). TTFA = total time for non-streaming engines.
+    """
     start = time.monotonic()
-    ttfa = 0.0
-    audio_chunks = []
-    sample_rate = 24000
-
-    # Try streaming first to get TTFA
     try:
-        first_chunk = True
-        async for audio_np, sr in engine.synthesize_streaming(
+        wav_bytes = await engine.synthesize(
             text=text,
             voice_conds_path=voice_conds_path,
             audio_prompt_path=audio_prompt_path,
-        ):
-            if first_chunk:
-                ttfa = (time.monotonic() - start) * 1000
-                first_chunk = True  # already set, just mark timing
-                first_chunk = False
-                sample_rate = sr
-            audio_chunks.append(audio_np)
-    except Exception:
-        # Fall back to non-streaming
-        try:
-            wav_bytes = await engine.synthesize(
-                text=text,
-                voice_conds_path=voice_conds_path,
-                audio_prompt_path=audio_prompt_path,
-            )
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            elapsed = time.monotonic() - start
-            audio_s, sr = _wav_duration(wav_bytes)
-            return SampleResult(
-                text=text, char_count=len(text),
-                total_time_ms=round(elapsed * 1000, 1),
-                ttfa_ms=round(elapsed * 1000, 1),  # no streaming = TTFA equals total
-                audio_duration_s=round(audio_s, 2),
-                rtf=round(audio_s / elapsed if elapsed > 0 else 0, 2),
-                audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
-            )
-        except Exception as e:
-            return SampleResult(
-                text=text, char_count=len(text),
-                total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
-                audio_b64="", error=str(e),
-            )
+        )
+    except Exception as e:
+        return SampleResult(
+            text=text, char_count=len(text),
+            total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
+            audio_b64="", error=str(e),
+        )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
     elapsed = time.monotonic() - start
     elapsed_ms = elapsed * 1000
-
-    # Combine chunks into one WAV
-    if audio_chunks:
-        combined = np.concatenate([c.flatten() for c in audio_chunks])
-        wav_bytes = audio_to_wav_bytes(combined, sample_rate)
-        audio_s = len(combined) / sample_rate
-    else:
-        wav_bytes = audio_to_wav_bytes(np.zeros(1, dtype=np.float32), sample_rate)
-        audio_s = 0
-
+    audio_s, _ = _wav_duration(wav_bytes)
     rtf = audio_s / elapsed if elapsed > 0 else 0
+    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
 
     return SampleResult(
         text=text, char_count=len(text),
         total_time_ms=round(elapsed_ms, 1),
-        ttfa_ms=round(ttfa, 1),
+        ttfa_ms=round(elapsed_ms, 1),  # non-streaming: TTFA = total
         audio_duration_s=round(audio_s, 2),
         rtf=round(rtf, 2),
-        audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
+        audio_b64=audio_b64,
     )
 
 
@@ -183,7 +145,7 @@ async def run_comparative_benchmark(
             except Exception as e:
                 results.append(EngineBenchmarkResult(
                     engine_id=engine_id, engine_name=engine.ENGINE_NAME,
-                    samples=[], avg_rtf=0, avg_time_ms=0,
+                    samples=[], avg_rtf=0, avg_time_ms=0, avg_ttfa_ms=0,
                     total_audio_s=0, total_time_ms=0,
                     vram_peak_mb=0, vram_allocated_mb=0,
                     error=f"Failed to load: {e}",
@@ -245,8 +207,14 @@ async def run_comparative_benchmark(
             vram_allocated_mb=round(vram_alloc, 1),
         ))
 
-        if not was_loaded:
-            _LOGGER.info("Unloading %s after benchmark", engine.ENGINE_NAME)
-            await engine.unload_model()
+        # Always unload after benchmarking to free VRAM for next engine
+        _LOGGER.info("Unloading %s after benchmark", engine.ENGINE_NAME)
+        await engine.unload_model()
+
+    # Reload the active engine after benchmark completes
+    active_engine = engine_mgr.get_engine(engine_mgr.active_engine_id)
+    if active_engine and active_engine._model is None:
+        _LOGGER.info("Reloading active engine %s after benchmark", engine_mgr.active_engine_id)
+        await active_engine.load_model()
 
     return results
