@@ -141,10 +141,25 @@ class ChatterboxEngine:
         return audio_to_wav_bytes(wav_tensor.squeeze(0).numpy(), self.sample_rate)
 
     def compute_conditionals(self, audio_path: str, output_path: str, exaggeration: float = 0.5) -> None:
+        import librosa
+        import soundfile as sf
+
         _LOGGER.info("Computing Chatterbox conditionals (exaggeration=%.2f)", exaggeration)
         start = time.monotonic()
-        self.model.prepare_conditionals(audio_path, exaggeration=exaggeration)
-        self.model.conds.save(Path(output_path))
+
+        # Ensure audio is float32 — librosa can return float64 which causes
+        # "expected scalar type Float but found Double" in Chatterbox
+        wav, sr = librosa.load(audio_path, sr=None)
+        wav = wav.astype(np.float32)
+        f32_path = Path(audio_path).with_suffix(".f32.wav")
+        sf.write(str(f32_path), wav, sr)
+
+        try:
+            self.model.prepare_conditionals(str(f32_path), exaggeration=exaggeration)
+            self.model.conds.save(Path(output_path))
+        finally:
+            f32_path.unlink(missing_ok=True)
+
         _LOGGER.info("Conditionals computed in %.1fs", time.monotonic() - start)
 
     async def compute_conditionals_async(self, audio_path: str, output_path: str, exaggeration: float = 0.5) -> None:
