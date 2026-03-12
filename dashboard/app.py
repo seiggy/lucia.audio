@@ -79,28 +79,43 @@ def create_app(
         name: str = Form(...),
         description: str = Form(""),
         exaggeration: float = Form(0.5),
-        audio: UploadFile = File(...),
+        audio: list[UploadFile] = File(...),
     ):
-        # Validate audio file
-        if not audio.filename:
+        # Validate at least one file
+        if not audio or not audio[0].filename:
             raise HTTPException(400, "No file uploaded")
 
-        audio_data = await audio.read()
-        if len(audio_data) < 1000:
-            raise HTTPException(400, "Audio file too small")
+        # Read and convert each file to WAV
+        wav_chunks = []
+        for f in audio:
+            data = await f.read()
+            if len(data) < 500:
+                continue
+            filename = (f.filename or "").lower()
+            if not filename.endswith(".wav"):
+                try:
+                    data = _convert_to_wav(data)
+                except Exception as e:
+                    _LOGGER.error("Audio conversion failed for %s: %s", f.filename, e)
+                    raise HTTPException(400, f"Failed to convert {f.filename}: {e}")
+            wav_chunks.append(data)
 
-        # Convert non-WAV formats (MP3, OGG, etc.) to WAV via ffmpeg
-        filename = (audio.filename or "").lower()
-        if not filename.endswith(".wav"):
+        if not wav_chunks:
+            raise HTTPException(400, "No valid audio files uploaded")
+
+        # Concatenate multiple clips into one WAV
+        if len(wav_chunks) > 1:
             try:
-                audio_data = _convert_to_wav(audio_data)
+                audio_data = _concatenate_wavs(wav_chunks)
             except Exception as e:
-                _LOGGER.error("Audio conversion failed: %s", e)
-                raise HTTPException(400, f"Failed to convert audio to WAV: {e}")
+                _LOGGER.error("Audio concatenation failed: %s", e)
+                raise HTTPException(400, f"Failed to combine audio clips: {e}")
+        else:
+            audio_data = wav_chunks[0]
 
-        # Validate duration
+        # Validate combined duration
         if not _is_valid_audio(audio_data):
-            raise HTTPException(400, "Audio too short. Please upload at least 5 seconds of audio.")
+            raise HTTPException(400, "Combined audio too short. Please upload at least 5 seconds total.")
 
         exaggeration = max(0.0, min(1.0, exaggeration))
 
@@ -319,6 +334,52 @@ def _convert_to_wav(audio_data: bytes) -> bytes:
             raise RuntimeError(f"ffmpeg failed: {stderr}")
 
         return Path(outfile.name).read_bytes()
+
+
+def _concatenate_wavs(wav_chunks: list[bytes]) -> bytes:
+    """Concatenate multiple WAV files into one using ffmpeg, with 0.3s silence gaps."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+        # Write each chunk and build ffmpeg concat list
+        list_path = tmpdir / "list.txt"
+        silence_path = tmpdir / "silence.wav"
+
+        # Generate a short silence WAV
+        subprocess.run(
+            ["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+             "-t", "0.3", "-sample_fmt", "s16", silence_path],
+            capture_output=True, timeout=10,
+        )
+
+        entries = []
+        for i, chunk in enumerate(wav_chunks):
+            chunk_path = tmpdir / f"chunk_{i}.wav"
+            # Normalize to same format
+            raw_path = tmpdir / f"raw_{i}.wav"
+            raw_path.write_bytes(chunk)
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(raw_path),
+                 "-ac", "1", "-ar", "44100", "-sample_fmt", "s16", str(chunk_path)],
+                capture_output=True, timeout=30,
+            )
+            entries.append(f"file '{chunk_path}'")
+            if i < len(wav_chunks) - 1:
+                entries.append(f"file '{silence_path}'")
+
+        list_path.write_text("\n".join(entries))
+        out_path = tmpdir / "combined.wav"
+
+        result = subprocess.run(
+            ["ffmpeg", "-y", "-f", "concat", "-safe", "0",
+             "-i", str(list_path), "-c", "copy", str(out_path)],
+            capture_output=True, timeout=60,
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode(errors="replace")[:500]
+            raise RuntimeError(f"ffmpeg concat failed: {stderr}")
+
+        return out_path.read_bytes()
 
 
 def _is_valid_audio(data: bytes) -> bool:

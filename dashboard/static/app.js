@@ -12,18 +12,21 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
 
 // ─── File input preview ───
 document.getElementById('voice-audio').addEventListener('change', function(e) {
-    const file = e.target.files[0];
+    const files = e.target.files;
     const label = document.getElementById('file-label');
     const preview = document.getElementById('upload-preview');
     recordedBlob = null; // clear any recording
 
-    if (file) {
-        label.textContent = file.name;
-        const url = URL.createObjectURL(file);
+    if (files.length > 1) {
+        label.textContent = `${files.length} files selected`;
+        preview.style.display = 'none';
+    } else if (files.length === 1) {
+        label.textContent = files[0].name;
+        const url = URL.createObjectURL(files[0]);
         preview.src = url;
         preview.style.display = 'block';
     } else {
-        label.textContent = 'Choose WAV file...';
+        label.textContent = 'Choose audio files...';
         preview.style.display = 'none';
     }
 });
@@ -193,9 +196,9 @@ document.getElementById('upload-form').addEventListener('submit', async function
     const btnLoading = btn.querySelector('.btn-loading');
     const fileInput = document.getElementById('voice-audio');
 
-    // Validate: must have either a file or a recording
-    if (!fileInput.files[0] && !recordedBlob) {
-        alert('Please upload a WAV file or record from your microphone.');
+    // Validate: must have either file(s) or a recording
+    if ((!fileInput.files || fileInput.files.length === 0) && !recordedBlob) {
+        alert('Please upload audio file(s) or record from your microphone.');
         return;
     }
 
@@ -205,8 +208,8 @@ document.getElementById('upload-form').addEventListener('submit', async function
 
     const formData = new FormData(this);
 
-    // If we have a recording, replace the file field
-    if (recordedBlob && !fileInput.files[0]) {
+    // If we have a recording and no files, replace the file field
+    if (recordedBlob && (!fileInput.files || fileInput.files.length === 0)) {
         formData.set('audio', recordedBlob, 'recording.wav');
     }
 

@@ -45,7 +45,7 @@
         <!-- Upload Section -->
         <section class="card upload-section">
             <h2>Add Voice Profile</h2>
-            <p class="hint">Upload an audio clip (WAV, MP3, OGG, FLAC — 5+ seconds) to create a new voice profile for TTS.</p>
+            <p class="hint">Upload one or more audio clips (WAV, MP3, OGG, FLAC — 5+ seconds total) to create a voice profile. Multiple clips will be combined.</p>
             <form id="upload-form">
                 <div class="form-row">
                     <div class="form-group">
@@ -70,8 +70,8 @@
                     </div>
                     <div class="tab-content active" id="tab-file">
                         <div class="file-input-wrapper">
-                            <input type="file" id="voice-audio" name="audio" accept="audio/wav,audio/wave,audio/mpeg,audio/mp3,audio/ogg,audio/flac,.wav,.mp3,.ogg,.flac">
-                            <div class="file-input-label" id="file-label">Choose WAV file...</div>
+                            <input type="file" id="voice-audio" name="audio" accept="audio/wav,audio/wave,audio/mpeg,audio/mp3,audio/ogg,audio/flac,.wav,.mp3,.ogg,.flac" multiple>
+                            <div class="file-input-label" id="file-label">Choose audio files...</div>
                         </div>
                     </div>
                     <div class="tab-content" id="tab-mic">
