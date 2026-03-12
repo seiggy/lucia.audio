@@ -252,6 +252,96 @@ def create_app(
             "voices": len(voice_manager.list_profiles()),
         }
 
+    @app.post("/api/voices/audition")
+    async def audition_exaggeration(
+        text: str = Form("Hello! This is a test of how my voice sounds with different expression levels."),
+        audio: list[UploadFile] = File(...),
+        values: str = Form(""),  # comma-separated exaggeration values, or empty for defaults
+    ):
+        """Generate TTS samples at multiple exaggeration levels for A/B comparison.
+
+        Phase 1 (coarse): values="" → uses 0.0, 0.25, 0.5, 0.75, 1.0
+        Phase 2 (fine): values="0.2,0.25,0.3,0.35,0.4" → uses specified values
+        """
+        chatterbox = engine_mgr.get_chatterbox()
+        if not chatterbox or chatterbox._model is None:
+            raise HTTPException(400, "Chatterbox engine not loaded (required for exaggeration tuning)")
+
+        # Parse exaggeration values
+        if values.strip():
+            exag_values = [max(0.0, min(1.0, float(v.strip()))) for v in values.split(",")]
+        else:
+            exag_values = [0.0, 0.25, 0.5, 0.75, 1.0]
+
+        # Read and prepare audio
+        wav_chunks = []
+        for f in audio:
+            data = await f.read()
+            if len(data) < 500:
+                continue
+            filename = (f.filename or "").lower()
+            if not filename.endswith(".wav"):
+                try:
+                    data = _convert_to_wav(data)
+                except Exception as e:
+                    raise HTTPException(400, f"Failed to convert {f.filename}: {e}")
+            wav_chunks.append(data)
+
+        if not wav_chunks:
+            raise HTTPException(400, "No valid audio files")
+
+        if len(wav_chunks) > 1:
+            audio_data = _concatenate_wavs(wav_chunks)
+        else:
+            audio_data = wav_chunks[0]
+
+        if not _is_valid_audio(audio_data):
+            raise HTTPException(400, "Audio too short (need 5+ seconds)")
+
+        # Save temp audio file
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp.write(audio_data)
+            tmp_audio_path = tmp.name
+
+        results = []
+        try:
+            for exag in exag_values:
+                _LOGGER.info("Audition: generating sample at exaggeration=%.2f", exag)
+                try:
+                    # Compute conditionals at this exaggeration
+                    with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp_conds:
+                        tmp_conds_path = tmp_conds.name
+
+                    await chatterbox.compute_conditionals_async(
+                        tmp_audio_path, tmp_conds_path, exaggeration=exag,
+                    )
+
+                    # Generate sample audio
+                    wav_bytes = await chatterbox.synthesize(
+                        text=text.strip(),
+                        voice_conds_path=Path(tmp_conds_path),
+                    )
+
+                    import base64
+                    results.append({
+                        "exaggeration": round(exag, 2),
+                        "audio_b64": base64.b64encode(wav_bytes).decode("ascii"),
+                    })
+
+                    Path(tmp_conds_path).unlink(missing_ok=True)
+
+                except Exception as e:
+                    _LOGGER.error("Audition failed at exag=%.2f: %s", exag, e)
+                    results.append({
+                        "exaggeration": round(exag, 2),
+                        "error": str(e),
+                    })
+        finally:
+            Path(tmp_audio_path).unlink(missing_ok=True)
+
+        return results
+
     @app.post("/api/benchmark")
     async def run_benchmark(
         text: str = Form(...),
