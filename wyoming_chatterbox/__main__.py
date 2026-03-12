@@ -13,7 +13,7 @@ from wyoming.server import AsyncServer, AsyncTcpServer
 
 from . import __version__
 from .handler import ChatterboxEventHandler
-from .tts_engine import TTSEngine
+from .engine_manager import EngineManager
 from .voice_manager import VoiceManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,7 +45,12 @@ async def main() -> None:
     parser.add_argument(
         "--no-half",
         action="store_true",
-        help="Disable fp16 inference",
+        help="Disable fp16 inference for Chatterbox",
+    )
+    parser.add_argument(
+        "--qwen3-model",
+        default="",
+        help="Qwen3-TTS model to load (e.g. Qwen/Qwen3-TTS-12Hz-0.6B-Base). Empty to disable.",
     )
     parser.add_argument(
         "--dashboard-port",
@@ -75,24 +80,30 @@ async def main() -> None:
     # Initialize voice manager
     voice_manager = VoiceManager(args.voices_dir)
 
-    # Initialize and load TTS engine
-    engine = TTSEngine(device=args.device, half_precision=not args.no_half)
-    await engine.load_model()
+    # Initialize engine manager and load all engines
+    engine_mgr = EngineManager(
+        device=args.device,
+        half_precision=not args.no_half,
+        qwen3_model=args.qwen3_model,
+    )
+    await engine_mgr.load_all()
 
-    # Compute conditionals for any profiles that don't have them yet
-    for profile in voice_manager.list_profiles():
-        if not profile.is_ready:
-            audio_path = voice_manager.get_audio_path(profile.id)
-            conds_path = voice_manager.get_profile_dir(profile.id) / "conds.pt"
-            if audio_path and audio_path.exists():
-                try:
-                    await engine.compute_conditionals_async(
-                        str(audio_path), str(conds_path)
-                    )
-                    voice_manager.mark_ready(profile.id)
-                    _LOGGER.info("Computed conditionals for profile: %s", profile.name)
-                except Exception as e:
-                    _LOGGER.error("Failed to compute conditionals for %s: %s", profile.name, e)
+    # Compute Chatterbox conditionals for any profiles that don't have them yet
+    chatterbox = engine_mgr.get_chatterbox()
+    if chatterbox and chatterbox._model is not None:
+        for profile in voice_manager.list_profiles():
+            if not profile.is_ready:
+                audio_path = voice_manager.get_audio_path(profile.id)
+                conds_path = voice_manager.get_profile_dir(profile.id) / "conds.pt"
+                if audio_path and audio_path.exists():
+                    try:
+                        await chatterbox.compute_conditionals_async(
+                            str(audio_path), str(conds_path)
+                        )
+                        voice_manager.mark_ready(profile.id)
+                        _LOGGER.info("Computed conditionals for: %s", profile.name)
+                    except Exception as e:
+                        _LOGGER.error("Failed conditionals for %s: %s", profile.name, e)
 
     # Build Wyoming info with available voices
     voices = []
@@ -101,10 +112,10 @@ async def main() -> None:
             voices.append(
                 TtsVoice(
                     name=profile.name,
-                    description=profile.description or f"Chatterbox voice: {profile.name}",
+                    description=profile.description or f"Voice: {profile.name}",
                     attribution=Attribution(
-                        name="Resemble AI",
-                        url="https://github.com/resemble-ai/chatterbox",
+                        name="Lucia.Audio",
+                        url="https://github.com/seiggy/lucia.audio",
                     ),
                     installed=True,
                     version=__version__,
@@ -112,15 +123,14 @@ async def main() -> None:
                 )
             )
 
-    # Always include a default entry
     if not voices:
         voices.append(
             TtsVoice(
                 name="default",
-                description="Chatterbox Turbo default voice",
+                description="Default voice",
                 attribution=Attribution(
-                    name="Resemble AI",
-                    url="https://github.com/resemble-ai/chatterbox",
+                    name="Lucia.Audio",
+                    url="https://github.com/seiggy/lucia.audio",
                 ),
                 installed=True,
                 version=__version__,
@@ -131,11 +141,11 @@ async def main() -> None:
     wyoming_info = Info(
         tts=[
             TtsProgram(
-                name="chatterbox",
-                description="Chatterbox Turbo TTS by Resemble AI — zero-shot voice cloning",
+                name="lucia-tts",
+                description="Lucia.Audio — multi-engine TTS with Chatterbox Turbo and Qwen3-TTS",
                 attribution=Attribution(
-                    name="Resemble AI",
-                    url="https://github.com/resemble-ai/chatterbox",
+                    name="Lucia.Audio",
+                    url="https://github.com/seiggy/lucia.audio",
                 ),
                 installed=True,
                 voices=sorted(voices, key=lambda v: v.name),
@@ -144,12 +154,12 @@ async def main() -> None:
         ],
     )
 
-    # Start dashboard if enabled
+    # Start dashboard
     dashboard_task = None
     if args.dashboard_port > 0:
         from dashboard.app import create_app
 
-        app = create_app(engine, voice_manager, wyoming_info)
+        app = create_app(engine_mgr, voice_manager, wyoming_info)
         dashboard_task = asyncio.create_task(
             _run_dashboard(app, args.dashboard_port)
         )
@@ -168,16 +178,16 @@ async def main() -> None:
             name=args.zeroconf, port=tcp_server.port, host=tcp_server.host
         )
         await hass_zeroconf.register_server()
-        _LOGGER.info("Zeroconf discovery enabled as '%s'", args.zeroconf)
 
-    _LOGGER.info("Wyoming Chatterbox TTS server ready on %s", args.uri)
+    _LOGGER.info("Wyoming TTS server ready on %s", args.uri)
+    _LOGGER.info("Engines: %s", [e["name"] for e in engine_mgr.list_engines() if e["loaded"]])
 
     server_task = asyncio.create_task(
         server.run(
             partial(
                 ChatterboxEventHandler,
                 wyoming_info,
-                engine,
+                engine_mgr,
                 voice_manager,
                 args.default_voice,
             )

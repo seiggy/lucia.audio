@@ -24,12 +24,15 @@ WORKDIR /app
 RUN pip install --upgrade pip setuptools wheel && \
     pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
 
-# Install chatterbox-tts without its pinned torch==2.6.0 dep, then its other deps
+# Install chatterbox-tts without its pinned deps (torch, transformers conflicts)
 RUN pip install --no-deps "chatterbox-tts>=0.1.6" && \
     pip install "numpy>=1.24.0,<1.26.0" librosa==0.11.0 s3tokenizer \
-    "transformers==4.46.3" "diffusers==0.29.0" "resemble-perth==1.0.1" \
+    "diffusers==0.29.0" "resemble-perth==1.0.1" \
     "conformer==0.3.2" "safetensors==0.5.3" spacy-pkuseg "pykakasi==2.3.0" \
     pyloudnorm omegaconf huggingface_hub
+
+# Install faster-qwen3-tts + shared transformers (>=4.57 satisfies both at runtime)
+RUN pip install "faster-qwen3-tts>=0.2.4" "transformers>=4.57" soundfile
 
 # Install Python dependencies (layer caching for faster rebuilds)
 COPY pyproject.toml README.md ./
@@ -52,4 +55,4 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8095/api/health')" || exit 1
 
 ENTRYPOINT ["python", "-m", "wyoming_chatterbox"]
-CMD ["--uri", "tcp://0.0.0.0:10200", "--voices-dir", "/data/voices", "--dashboard-port", "8095"]
+CMD ["--uri", "tcp://0.0.0.0:10200", "--voices-dir", "/data/voices", "--dashboard-port", "8095", "--qwen3-model", "Qwen/Qwen3-TTS-12Hz-0.6B-Base"]

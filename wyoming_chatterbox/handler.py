@@ -13,7 +13,7 @@ from wyoming.info import Describe, Info
 from wyoming.server import AsyncEventHandler
 from wyoming.tts import Synthesize
 
-from .tts_engine import TTSEngine
+from .engine_manager import EngineManager
 from .voice_manager import VoiceManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ class ChatterboxEventHandler(AsyncEventHandler):
     def __init__(
         self,
         wyoming_info: Info,
-        engine: TTSEngine,
+        engine_mgr: EngineManager,
         voice_manager: VoiceManager,
         default_voice: Optional[str],
         *args,
@@ -36,7 +36,7 @@ class ChatterboxEventHandler(AsyncEventHandler):
         super().__init__(*args, **kwargs)
         self.wyoming_info = wyoming_info
         self.wyoming_info_event = wyoming_info.event()
-        self.engine = engine
+        self.engine_mgr = engine_mgr
         self.voice_manager = voice_manager
         self.default_voice = default_voice
 
@@ -79,12 +79,14 @@ class ChatterboxEventHandler(AsyncEventHandler):
 
         # Look up voice profile
         conds_path = None
+        audio_path = None
         if voice_name:
             profile = self.voice_manager.get_profile_by_name(voice_name)
             if profile is None:
                 profile = self.voice_manager.get_profile(voice_name)
             if profile and profile.is_ready:
                 conds_path = self.voice_manager.get_conds_path(profile.id)
+                audio_path = self.voice_manager.get_audio_path(profile.id)
                 _LOGGER.debug("Using voice profile: %s", profile.name)
             else:
                 _LOGGER.warning("Voice '%s' not found or not ready, using default", voice_name)
@@ -94,12 +96,14 @@ class ChatterboxEventHandler(AsyncEventHandler):
             default = self.voice_manager.get_default_voice()
             if default:
                 conds_path = self.voice_manager.get_conds_path(default.id)
+                audio_path = self.voice_manager.get_audio_path(default.id)
                 _LOGGER.debug("Using default voice: %s", default.name)
 
         # Synthesize
-        wav_bytes = await self.engine.synthesize(
+        wav_bytes = await self.engine_mgr.synthesize(
             text=text,
             voice_conds_path=conds_path,
+            audio_prompt_path=str(audio_path) if audio_path else None,
         )
 
         # Stream WAV audio back as Wyoming events

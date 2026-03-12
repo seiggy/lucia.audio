@@ -27,6 +27,7 @@ services:
     #   --voices-dir /data/voices
     #   --dashboard-port 8095
     #   --default-voice "Lucia"
+    #   --qwen3-model "Qwen/Qwen3-TTS-12Hz-0.6B-Base"
     #   --zeroconf
 
 volumes:

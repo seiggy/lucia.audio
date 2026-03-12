@@ -15,7 +15,7 @@ from starlette.requests import Request
 from wyoming.info import Attribution, Info, TtsProgram, TtsVoice
 
 from wyoming_chatterbox import __version__
-from wyoming_chatterbox.tts_engine import TTSEngine
+from wyoming_chatterbox.engine_manager import EngineManager
 from wyoming_chatterbox.voice_manager import VoiceManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -24,7 +24,7 @@ DASHBOARD_DIR = Path(__file__).parent
 
 
 def create_app(
-    engine: TTSEngine,
+    engine_mgr: EngineManager,
     voice_manager: VoiceManager,
     wyoming_info: Info,
 ) -> FastAPI:
@@ -36,11 +36,13 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         profiles = voice_manager.list_profiles()
+        engines = engine_mgr.list_engines()
         return templates.TemplateResponse(
             "index.html",
             {
                 "request": request,
                 "profiles": profiles,
+                "engines": engines,
                 "version": __version__,
             },
         )
@@ -49,6 +51,10 @@ def create_app(
     async def list_voices():
         profiles = voice_manager.list_profiles()
         return [p.to_dict() for p in profiles]
+
+    @app.get("/api/engines")
+    async def list_engines():
+        return engine_mgr.list_engines()
 
     @app.post("/api/voices")
     async def create_voice(
@@ -74,13 +80,19 @@ def create_app(
         # Create profile
         profile = voice_manager.create_profile(name, audio_data, description, exaggeration)
 
-        # Compute conditionals in background
+        # Compute Chatterbox conditionals
         try:
             audio_path = voice_manager.get_audio_path(profile.id)
             conds_path = voice_manager.get_profile_dir(profile.id) / "conds.pt"
-            await engine.compute_conditionals_async(
-                str(audio_path), str(conds_path), exaggeration=exaggeration
-            )
+            chatterbox = engine_mgr.get_chatterbox()
+            if chatterbox and chatterbox._model is not None:
+                await chatterbox.compute_conditionals_async(
+                    str(audio_path), str(conds_path), exaggeration=exaggeration
+                )
+                voice_manager.mark_ready(profile.id)
+            else:
+                # No Chatterbox — mark ready anyway (Qwen3 uses raw audio)
+                voice_manager.mark_ready(profile.id)
             voice_manager.mark_ready(profile.id)
             profile = voice_manager.get_profile(profile.id)
         except Exception as e:
@@ -118,10 +130,12 @@ def create_app(
             conds_path = voice_manager.get_profile_dir(profile_id) / "conds.pt"
             if audio_path and audio_path.exists():
                 try:
-                    await engine.compute_conditionals_async(
-                        str(audio_path), str(conds_path), exaggeration=exaggeration
-                    )
-                    voice_manager.mark_ready(profile_id)
+                    chatterbox = engine_mgr.get_chatterbox()
+                    if chatterbox and chatterbox._model is not None:
+                        await chatterbox.compute_conditionals_async(
+                            str(audio_path), str(conds_path), exaggeration=exaggeration
+                        )
+                        voice_manager.mark_ready(profile_id)
                 except Exception as e:
                     _LOGGER.error("Failed to recompute conditionals: %s", e)
                     raise HTTPException(500, f"Failed to reprocess voice: {str(e)}")
@@ -136,6 +150,7 @@ def create_app(
     async def test_tts(
         text: str = Form(...),
         voice_id: str = Form(""),
+        engine_id: str = Form(""),
         temperature: float = Form(0.8),
         top_p: float = Form(0.95),
         top_k: int = Form(1000),
@@ -150,17 +165,22 @@ def create_app(
         repetition_penalty = max(1.0, min(3.0, repetition_penalty))
 
         conds_path = None
+        audio_prompt_path = None
         if voice_id:
             conds_path = voice_manager.get_conds_path(voice_id)
+            audio_prompt_path = voice_manager.get_audio_path(voice_id)
         if conds_path is None:
             default = voice_manager.get_default_voice()
             if default:
                 conds_path = voice_manager.get_conds_path(default.id)
+                audio_prompt_path = voice_manager.get_audio_path(default.id)
 
         try:
-            wav_bytes = await engine.synthesize(
+            wav_bytes = await engine_mgr.synthesize(
                 text=text.strip(),
+                engine_id=engine_id or None,
                 voice_conds_path=conds_path,
+                audio_prompt_path=str(audio_prompt_path) if audio_prompt_path else None,
                 temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
@@ -186,7 +206,7 @@ def create_app(
         return {
             "status": "ok",
             "version": __version__,
-            "model": "chatterbox-turbo",
+            "engines": engine_mgr.list_engines(),
             "voices": len(voice_manager.list_profiles()),
         }
 
