@@ -49,6 +49,14 @@ class ChatterboxEngine:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._load_model_sync)
 
+    async def unload_model(self) -> None:
+        """Unload model and free GPU memory."""
+        import torch
+        self._model = None
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+        _LOGGER.info("Chatterbox Turbo unloaded")
+
     def _load_model_sync(self) -> None:
         from huggingface_hub import snapshot_download
         from chatterbox.tts_turbo import ChatterboxTurboTTS, REPO_ID

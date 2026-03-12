@@ -296,3 +296,80 @@ function playVoiceRef(id) {
     const audio = new Audio(`/api/voices/${id}/audio`);
     audio.play();
 }
+
+// ─── Engine activation + status ───
+function updateEngineUI(activeId) {
+    window.ACTIVE_ENGINE = activeId;
+    // Update body class for conditional CSS
+    document.body.className = document.body.className.replace(/engine-\S+/g, '');
+    document.body.classList.add('engine-' + activeId);
+
+    // Update engine buttons
+    document.querySelectorAll('.engine-btn').forEach(btn => {
+        const isActive = btn.dataset.engine === activeId;
+        btn.classList.toggle('active', isActive);
+        btn.disabled = isActive;
+        btn.querySelector('.engine-btn-state').textContent = isActive ? '● Active' : '○ Inactive';
+    });
+
+    // Update status badge
+    const badge = document.getElementById('engine-status-badge');
+    badge.textContent = 'ready';
+    badge.dataset.state = 'ready';
+}
+
+async function activateEngine(engineId) {
+    if (engineId === window.ACTIVE_ENGINE) return;
+
+    const progress = document.getElementById('engine-swap-progress');
+    const progressText = document.getElementById('engine-swap-text');
+    const badge = document.getElementById('engine-status-badge');
+
+    // Disable all engine buttons during swap
+    document.querySelectorAll('.engine-btn').forEach(b => b.disabled = true);
+
+    progress.style.display = 'flex';
+    progressText.textContent = 'Unloading current engine...';
+    badge.textContent = 'swapping';
+    badge.dataset.state = 'loading';
+
+    try {
+        // Start polling status
+        const pollId = setInterval(async () => {
+            try {
+                const sr = await fetch('/api/engine/status');
+                const st = await sr.json();
+                const states = st.engines.map(e => `${e.name}: ${e.state}`).join(' • ');
+                progressText.textContent = states;
+            } catch(_) {}
+        }, 500);
+
+        const formData = new FormData();
+        formData.set('engine_id', engineId);
+        const resp = await fetch('/api/engine/activate', {
+            method: 'POST',
+            body: formData,
+        });
+
+        clearInterval(pollId);
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Activation failed');
+        }
+
+        const status = await resp.json();
+        updateEngineUI(status.active_engine);
+        progress.style.display = 'none';
+    } catch (err) {
+        alert('Engine switch failed: ' + err.message);
+        badge.textContent = 'error';
+        badge.dataset.state = 'error';
+        progress.style.display = 'none';
+        // Re-enable buttons
+        document.querySelectorAll('.engine-btn').forEach(b => b.disabled = false);
+    }
+}
+
+// Initialize engine-specific UI on load
+updateEngineUI(window.ACTIVE_ENGINE);

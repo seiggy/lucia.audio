@@ -36,6 +36,14 @@ class Qwen3Engine:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._load_model_sync)
 
+    async def unload_model(self) -> None:
+        """Unload model and free GPU memory."""
+        import torch
+        self._model = None
+        if self.device == "cuda":
+            torch.cuda.empty_cache()
+        _LOGGER.info("Qwen3-TTS unloaded")
+
     def _load_model_sync(self) -> None:
         import torch
         from faster_qwen3_tts import FasterQwen3TTS

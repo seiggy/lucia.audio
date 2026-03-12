@@ -10,11 +10,38 @@
     <header>
         <div class="header-content">
             <h1>🎙️ Lucia.Audio</h1>
-            <span class="subtitle">Chatterbox Turbo TTS • Wyoming Protocol</span>
+            <span class="subtitle">Multi-Engine TTS • Wyoming Protocol</span>
         </div>
     </header>
 
     <main>
+        <!-- Server Engine Status -->
+        <section class="card engine-card">
+            <div class="engine-header">
+                <h2>Voice Server Engine</h2>
+                <span class="engine-status" id="engine-status-badge">
+                    {% for engine in engines %}{% if engine.active %}{{ engine.state }}{% endif %}{% endfor %}
+                </span>
+            </div>
+            <p class="hint">Select the TTS engine powering the Wyoming voice server. Switching engines will briefly take the server offline.</p>
+            <div class="engine-selector">
+                {% for engine in engines %}
+                <button type="button"
+                    class="engine-btn {% if engine.active %}active{% endif %}"
+                    data-engine="{{ engine.id }}"
+                    onclick="activateEngine('{{ engine.id }}')"
+                    {% if engine.active %}disabled{% endif %}>
+                    <span class="engine-btn-name">{{ engine.name }}</span>
+                    <span class="engine-btn-state">{% if engine.active %}● Active{% else %}○ Inactive{% endif %}</span>
+                </button>
+                {% endfor %}
+            </div>
+            <div id="engine-swap-progress" class="swap-progress" style="display:none;">
+                <div class="swap-spinner"></div>
+                <span id="engine-swap-text">Switching engine...</span>
+            </div>
+        </section>
+
         <!-- Upload Section -->
         <section class="card upload-section">
             <h2>Add Voice Profile</h2>
@@ -30,10 +57,10 @@
                         <input type="text" id="voice-desc" name="description" placeholder="Optional description">
                     </div>
                 </div>
-                <div class="form-group">
+                <div class="form-group chatterbox-only">
                     <label for="voice-exaggeration">Exaggeration <span class="slider-value" id="exag-val">0.50</span></label>
                     <input type="range" id="voice-exaggeration" name="exaggeration" min="0" max="1" step="0.05" value="0.5" class="slider" oninput="document.getElementById('exag-val').textContent=parseFloat(this.value).toFixed(2)">
-                    <span class="hint">Controls emotion intensity baked into the voice profile. 0 = neutral, 1 = very expressive.</span>
+                    <span class="hint">Chatterbox only — controls emotion intensity baked into the voice profile.</span>
                 </div>
                 <div class="form-group">
                     <label>Reference Audio (WAV, 5+ seconds)</label>
@@ -99,28 +126,16 @@
         <section class="card">
             <h2>Test TTS</h2>
             <form id="tts-form">
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="tts-voice">Voice</label>
-                        <select id="tts-voice" name="voice_id">
-                            <option value="">Default</option>
-                            {% for profile in profiles %}
-                            {% if profile.is_ready %}
-                            <option value="{{ profile.id }}">{{ profile.name }}</option>
-                            {% endif %}
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label for="tts-engine">Engine</label>
-                        <select id="tts-engine" name="engine_id">
-                            {% for engine in engines %}
-                            {% if engine.loaded %}
-                            <option value="{{ engine.id }}">{{ engine.name }}</option>
-                            {% endif %}
-                            {% endfor %}
-                        </select>
-                    </div>
+                <div class="form-group">
+                    <label for="tts-voice">Voice</label>
+                    <select id="tts-voice" name="voice_id">
+                        <option value="">Default</option>
+                        {% for profile in profiles %}
+                        {% if profile.is_ready %}
+                        <option value="{{ profile.id }}">{{ profile.name }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
                 </div>
                 <div class="form-group">
                     <label for="tts-text">Text to Speak</label>
@@ -164,9 +179,13 @@
     </main>
 
     <footer>
-        <p>Lucia.Audio v{{ version }} • Powered by <a href="https://github.com/resemble-ai/chatterbox" target="_blank">Chatterbox Turbo</a> • <a href="https://www.home-assistant.io/integrations/wyoming/" target="_blank">Wyoming Protocol</a></p>
+        <p>Lucia.Audio v{{ version }} • Powered by <a href="https://github.com/resemble-ai/chatterbox" target="_blank">Chatterbox Turbo</a> + <a href="https://github.com/andimarafioti/faster-qwen3-tts" target="_blank">Qwen3-TTS</a> • <a href="https://www.home-assistant.io/integrations/wyoming/" target="_blank">Wyoming Protocol</a></p>
     </footer>
 
+    <script>
+        // Active engine state — used by app.js for conditional UI
+        window.ACTIVE_ENGINE = '{% for e in engines %}{% if e.active %}{{ e.id }}{% endif %}{% endfor %}';
+    </script>
     <script src="/static/app.js"></script>
 </body>
 </html>

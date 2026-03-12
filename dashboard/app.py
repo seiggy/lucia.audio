@@ -56,6 +56,22 @@ def create_app(
     async def list_engines():
         return engine_mgr.list_engines()
 
+    @app.get("/api/engine/status")
+    async def engine_status():
+        return engine_mgr.get_status()
+
+    @app.post("/api/engine/activate")
+    async def activate_engine(engine_id: str = Form(...)):
+        if engine_id not in engine_mgr.engines:
+            raise HTTPException(404, f"Unknown engine: {engine_id}")
+        try:
+            await engine_mgr.activate_engine(engine_id)
+            _update_wyoming_voices(wyoming_info, voice_manager)
+            return engine_mgr.get_status()
+        except Exception as e:
+            _LOGGER.error("Engine activation failed: %s", e, exc_info=True)
+            raise HTTPException(500, f"Failed to activate engine: {str(e)}")
+
     @app.post("/api/voices")
     async def create_voice(
         name: str = Form(...),
