@@ -88,8 +88,11 @@ class TTSEngine:
         voice_conds_path: Optional[Path] = None,
         audio_prompt_path: Optional[str] = None,
         temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 1000,
+        repetition_penalty: float = 1.2,
     ) -> bytes:
-        """Synthesize text to WAV bytes (16-bit PCM, mono, 22050Hz for Wyoming compat).
+        """Synthesize text to WAV bytes (16-bit PCM, mono).
 
         Uses pre-computed conditionals for minimum latency when available.
         Returns raw WAV file bytes.
@@ -104,6 +107,9 @@ class TTSEngine:
                 voice_conds_path,
                 audio_prompt_path,
                 temperature,
+                top_p,
+                top_k,
+                repetition_penalty,
             )
 
         return wav_bytes
@@ -121,30 +127,31 @@ class TTSEngine:
         voice_conds_path: Optional[Path],
         audio_prompt_path: Optional[str],
         temperature: float,
+        top_p: float,
+        top_k: int,
+        repetition_penalty: float,
     ) -> bytes:
         from chatterbox.tts_turbo import Conditionals
 
         start = time.monotonic()
+        gen_kwargs = dict(
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+        )
 
         # Load pre-computed conditionals if available
         if voice_conds_path and voice_conds_path.exists():
             conds = Conditionals.load(voice_conds_path, map_location=self.device)
             self.model.conds = conds
-            wav_tensor = self._generate_with_autocast(
-                text,
-                temperature=temperature,
-            )
+            wav_tensor = self._generate_with_autocast(text, **gen_kwargs)
         elif audio_prompt_path:
             wav_tensor = self._generate_with_autocast(
-                text,
-                audio_prompt_path=audio_prompt_path,
-                temperature=temperature,
+                text, audio_prompt_path=audio_prompt_path, **gen_kwargs
             )
         else:
-            wav_tensor = self._generate_with_autocast(
-                text,
-                temperature=temperature,
-            )
+            wav_tensor = self._generate_with_autocast(text, **gen_kwargs)
 
         elapsed = time.monotonic() - start
         _LOGGER.info("Synthesized %d chars in %.2fs", len(text), elapsed)
@@ -163,12 +170,12 @@ class TTSEngine:
 
         return buf.getvalue()
 
-    def compute_conditionals(self, audio_path: str, output_path: str) -> None:
+    def compute_conditionals(self, audio_path: str, output_path: str, exaggeration: float = 0.5) -> None:
         """Pre-compute voice conditionals from a reference audio clip and save to disk."""
-        _LOGGER.info("Computing conditionals from %s", audio_path)
+        _LOGGER.info("Computing conditionals from %s (exaggeration=%.2f)", audio_path, exaggeration)
         start = time.monotonic()
 
-        self.model.prepare_conditionals(audio_path)
+        self.model.prepare_conditionals(audio_path, exaggeration=exaggeration)
 
         # Save the computed conditionals
         self.model.conds.save(Path(output_path))
@@ -176,10 +183,10 @@ class TTSEngine:
         elapsed = time.monotonic() - start
         _LOGGER.info("Conditionals computed in %.1fs -> %s", elapsed, output_path)
 
-    async def compute_conditionals_async(self, audio_path: str, output_path: str) -> None:
+    async def compute_conditionals_async(self, audio_path: str, output_path: str, exaggeration: float = 0.5) -> None:
         """Async wrapper for conditional computation."""
         loop = asyncio.get_event_loop()
         async with self._lock:
             await loop.run_in_executor(
-                None, self.compute_conditionals, audio_path, output_path
+                None, self.compute_conditionals, audio_path, output_path, exaggeration
             )

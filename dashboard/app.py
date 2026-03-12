@@ -54,6 +54,7 @@ def create_app(
     async def create_voice(
         name: str = Form(...),
         description: str = Form(""),
+        exaggeration: float = Form(0.5),
         audio: UploadFile = File(...),
     ):
         # Validate audio file
@@ -68,14 +69,18 @@ def create_app(
         if not _is_valid_audio(audio_data):
             raise HTTPException(400, "Invalid audio file. Please upload a WAV file (at least 5 seconds).")
 
+        exaggeration = max(0.0, min(1.0, exaggeration))
+
         # Create profile
-        profile = voice_manager.create_profile(name, audio_data, description)
+        profile = voice_manager.create_profile(name, audio_data, description, exaggeration)
 
         # Compute conditionals in background
         try:
             audio_path = voice_manager.get_audio_path(profile.id)
             conds_path = voice_manager.get_profile_dir(profile.id) / "conds.pt"
-            await engine.compute_conditionals_async(str(audio_path), str(conds_path))
+            await engine.compute_conditionals_async(
+                str(audio_path), str(conds_path), exaggeration=exaggeration
+            )
             voice_manager.mark_ready(profile.id)
             profile = voice_manager.get_profile(profile.id)
         except Exception as e:
@@ -100,8 +105,28 @@ def create_app(
         profile_id: str,
         name: Optional[str] = Form(None),
         description: Optional[str] = Form(None),
+        exaggeration: Optional[float] = Form(None),
     ):
-        profile = voice_manager.update_profile(profile_id, name, description)
+        profile = voice_manager.get_profile(profile_id)
+        if profile is None:
+            raise HTTPException(404, "Voice profile not found")
+
+        # If exaggeration changed, recompute conditionals
+        if exaggeration is not None and abs(exaggeration - profile.exaggeration) > 0.01:
+            exaggeration = max(0.0, min(1.0, exaggeration))
+            audio_path = voice_manager.get_audio_path(profile_id)
+            conds_path = voice_manager.get_profile_dir(profile_id) / "conds.pt"
+            if audio_path and audio_path.exists():
+                try:
+                    await engine.compute_conditionals_async(
+                        str(audio_path), str(conds_path), exaggeration=exaggeration
+                    )
+                    voice_manager.mark_ready(profile_id)
+                except Exception as e:
+                    _LOGGER.error("Failed to recompute conditionals: %s", e)
+                    raise HTTPException(500, f"Failed to reprocess voice: {str(e)}")
+
+        profile = voice_manager.update_profile(profile_id, name, description, exaggeration)
         if profile is None:
             raise HTTPException(404, "Voice profile not found")
         _update_wyoming_voices(wyoming_info, voice_manager)
@@ -111,9 +136,18 @@ def create_app(
     async def test_tts(
         text: str = Form(...),
         voice_id: str = Form(""),
+        temperature: float = Form(0.8),
+        top_p: float = Form(0.95),
+        top_k: int = Form(1000),
+        repetition_penalty: float = Form(1.2),
     ):
         if not text.strip():
             raise HTTPException(400, "Text is required")
+
+        temperature = max(0.1, min(2.0, temperature))
+        top_p = max(0.0, min(1.0, top_p))
+        top_k = max(1, min(5000, top_k))
+        repetition_penalty = max(1.0, min(3.0, repetition_penalty))
 
         conds_path = None
         if voice_id:
@@ -124,7 +158,14 @@ def create_app(
                 conds_path = voice_manager.get_conds_path(default.id)
 
         try:
-            wav_bytes = await engine.synthesize(text=text.strip(), voice_conds_path=conds_path)
+            wav_bytes = await engine.synthesize(
+                text=text.strip(),
+                voice_conds_path=conds_path,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+            )
             return Response(content=wav_bytes, media_type="audio/wav")
         except Exception as e:
             _LOGGER.error("TTS error: %s", e, exc_info=True)

@@ -29,6 +29,7 @@ class VoiceProfile:
     conds_file: Optional[str] = None  # path relative to profile dir
     description: str = ""
     is_ready: bool = False  # True once conditionals are computed
+    exaggeration: float = 0.5  # emotion intensity, baked into conditionals
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -102,7 +103,7 @@ class VoiceManager:
             return self.get_profile_dir(profile_id) / profile.audio_file
         return None
 
-    def create_profile(self, name: str, audio_data: bytes, description: str = "") -> VoiceProfile:
+    def create_profile(self, name: str, audio_data: bytes, description: str = "", exaggeration: float = 0.5) -> VoiceProfile:
         """Create a new voice profile from uploaded audio data.
 
         The audio clip is saved to disk. Conditionals must be computed separately.
@@ -123,6 +124,7 @@ class VoiceManager:
             audio_file=AUDIO_FILE,
             description=description,
             is_ready=False,
+            exaggeration=exaggeration,
         )
 
         # Save metadata
@@ -153,7 +155,7 @@ class VoiceManager:
         _LOGGER.info("Deleted voice profile: %s (%s)", profile.name, profile_id)
         return True
 
-    def update_profile(self, profile_id: str, name: Optional[str] = None, description: Optional[str] = None) -> Optional[VoiceProfile]:
+    def update_profile(self, profile_id: str, name: Optional[str] = None, description: Optional[str] = None, exaggeration: Optional[float] = None) -> Optional[VoiceProfile]:
         """Update profile metadata."""
         profile = self._profiles.get(profile_id)
         if profile is None:
@@ -163,6 +165,8 @@ class VoiceManager:
             profile.name = name
         if description is not None:
             profile.description = description
+        if exaggeration is not None:
+            profile.exaggeration = exaggeration
 
         self._save_profile_meta(profile)
         return profile
