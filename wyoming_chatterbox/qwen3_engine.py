@@ -38,8 +38,10 @@ class Qwen3Engine:
 
     async def unload_model(self) -> None:
         """Unload model and free GPU memory."""
+        import gc
         import torch
         self._model = None
+        gc.collect()
         if self.device == "cuda":
             torch.cuda.empty_cache()
         _LOGGER.info("Qwen3-TTS unloaded")

@@ -51,8 +51,10 @@ class ChatterboxEngine:
 
     async def unload_model(self) -> None:
         """Unload model and free GPU memory."""
+        import gc
         import torch
         self._model = None
+        gc.collect()
         if self.device == "cuda":
             torch.cuda.empty_cache()
         _LOGGER.info("Chatterbox Turbo unloaded")

@@ -1,6 +1,7 @@
 """Benchmark runner — measures TTS engine performance across multiple samples."""
 
 import base64
+import gc
 import io
 import logging
 import time
@@ -64,17 +65,26 @@ def _wav_duration(wav_bytes: bytes) -> tuple[float, int]:
 
 
 async def _run_sample(engine, text, voice_conds_path, audio_prompt_path) -> SampleResult:
-    """Run a single synthesis sample, using streaming to measure TTFA when available."""
+    """Run a single synthesis sample, using streaming for TTFA when available.
+
+    For Chatterbox: uses non-streaming (chunk decode has alignment constraints).
+    For Qwen3: uses native streaming to capture real TTFA.
+    """
     from .tts_engine import audio_to_wav_bytes
 
-    start = time.monotonic()
-    ttfa = 0.0
-    audio_chunks = []
-    sample_rate = 24000
-    used_streaming = False
+    # Only use streaming for engines that have native streaming support (Qwen3)
+    # Chatterbox streaming has chunk decode alignment issues
+    use_streaming = (
+        hasattr(engine, 'synthesize_streaming')
+        and engine.ENGINE_ID != 'chatterbox'
+    )
 
-    # Try streaming to get real TTFA
-    if hasattr(engine, 'synthesize_streaming'):
+    start = time.monotonic()
+
+    if use_streaming:
+        ttfa = 0.0
+        audio_chunks = []
+        sample_rate = 24000
         try:
             first_chunk = True
             async for audio_np, sr in engine.synthesize_streaming(
@@ -87,60 +97,59 @@ async def _run_sample(engine, text, voice_conds_path, audio_prompt_path) -> Samp
                     first_chunk = False
                     sample_rate = sr
                 audio_chunks.append(audio_np)
-            used_streaming = True
-        except Exception as e:
-            _LOGGER.debug("Streaming failed for sample, falling back: %s", e)
-            audio_chunks = []
-            used_streaming = False
 
-    # Fall back to non-streaming
-    if not used_streaming:
-        start = time.monotonic()  # reset timer for fair measurement
-        try:
-            wav_bytes = await engine.synthesize(
-                text=text,
-                voice_conds_path=voice_conds_path,
-                audio_prompt_path=audio_prompt_path,
-            )
-        except Exception as e:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            elapsed = time.monotonic() - start
+
+            if audio_chunks:
+                combined = np.concatenate([c.flatten() for c in audio_chunks])
+                wav_bytes = audio_to_wav_bytes(combined, sample_rate)
+                audio_s = len(combined) / sample_rate
+            else:
+                return SampleResult(
+                    text=text, char_count=len(text),
+                    total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
+                    audio_b64="", error="No audio chunks produced",
+                )
+
             return SampleResult(
                 text=text, char_count=len(text),
-                total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
-                audio_b64="", error=str(e),
+                total_time_ms=round(elapsed * 1000, 1),
+                ttfa_ms=round(ttfa, 1),
+                audio_duration_s=round(audio_s, 2),
+                rtf=round(audio_s / elapsed if elapsed > 0 else 0, 2),
+                audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
             )
+        except Exception as e:
+            _LOGGER.debug("Streaming benchmark failed, falling back: %s", e)
+            # Fall through to non-streaming below
+            start = time.monotonic()
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-
-        elapsed = time.monotonic() - start
-        audio_s, _ = _wav_duration(wav_bytes)
+    # Non-streaming path
+    try:
+        wav_bytes = await engine.synthesize(
+            text=text,
+            voice_conds_path=voice_conds_path,
+            audio_prompt_path=audio_prompt_path,
+        )
+    except Exception as e:
         return SampleResult(
             text=text, char_count=len(text),
-            total_time_ms=round(elapsed * 1000, 1),
-            ttfa_ms=round(elapsed * 1000, 1),  # non-streaming: TTFA = total
-            audio_duration_s=round(audio_s, 2),
-            rtf=round(audio_s / elapsed if elapsed > 0 else 0, 2),
-            audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
+            total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
+            audio_b64="", error=str(e),
         )
 
-    # Process streaming results
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
     elapsed = time.monotonic() - start
-
-    if audio_chunks:
-        combined = np.concatenate([c.flatten() for c in audio_chunks])
-        wav_bytes = audio_to_wav_bytes(combined, sample_rate)
-        audio_s = len(combined) / sample_rate
-    else:
-        wav_bytes = audio_to_wav_bytes(np.zeros(1, dtype=np.float32), sample_rate)
-        audio_s = 0
+    audio_s, _ = _wav_duration(wav_bytes)
 
     return SampleResult(
         text=text, char_count=len(text),
         total_time_ms=round(elapsed * 1000, 1),
-        ttfa_ms=round(ttfa, 1),
+        ttfa_ms=round(elapsed * 1000, 1),  # non-streaming: TTFA = total
         audio_duration_s=round(audio_s, 2),
         rtf=round(audio_s / elapsed if elapsed > 0 else 0, 2),
         audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
@@ -179,6 +188,7 @@ async def run_comparative_benchmark(
 
     for engine_id, engine in engine_mgr.engines.items():
         if torch.cuda.is_available():
+            gc.collect()
             torch.cuda.empty_cache()
 
         # Load engine if not loaded
