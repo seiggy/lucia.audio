@@ -142,23 +142,46 @@ class ChatterboxEngine:
 
     def compute_conditionals(self, audio_path: str, output_path: str, exaggeration: float = 0.5) -> None:
         import librosa
-        import soundfile as sf
+        from chatterbox.models.s3gen import S3GEN_SR
+        from chatterbox.models.s3tokenizer import S3_SR
 
         _LOGGER.info("Computing Chatterbox conditionals (exaggeration=%.2f)", exaggeration)
         start = time.monotonic()
 
-        # Ensure audio is float32 — librosa can return float64 which causes
-        # "expected scalar type Float but found Double" in Chatterbox
-        wav, sr = librosa.load(audio_path, sr=None)
-        wav = wav.astype(np.float32)
-        f32_path = Path(audio_path).with_suffix(".f32.wav")
-        sf.write(str(f32_path), wav, sr)
+        # Replicate prepare_conditionals with explicit float32 casts to avoid
+        # "expected Float but found Double" from pyloudnorm/librosa float64
+        s3gen_ref_wav, _sr = librosa.load(audio_path, sr=S3GEN_SR)
+        s3gen_ref_wav = s3gen_ref_wav.astype(np.float32)
 
-        try:
-            self.model.prepare_conditionals(str(f32_path), exaggeration=exaggeration)
-            self.model.conds.save(Path(output_path))
-        finally:
-            f32_path.unlink(missing_ok=True)
+        assert len(s3gen_ref_wav) / _sr > 5.0, "Audio prompt must be longer than 5 seconds!"
+
+        s3gen_ref_wav = self.model.norm_loudness(s3gen_ref_wav, _sr).astype(np.float32)
+
+        ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR).astype(np.float32)
+
+        s3gen_ref_wav = s3gen_ref_wav[:self.model.DEC_COND_LEN]
+        s3gen_ref_dict = self.model.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
+
+        if plen := self.model.t3.hp.speech_cond_prompt_len:
+            s3_tokzr = self.model.s3gen.tokenizer
+            t3_cond_prompt_tokens, _ = s3_tokzr.forward(
+                [ref_16k_wav[:self.model.ENC_COND_LEN]], max_len=plen
+            )
+            t3_cond_prompt_tokens = torch.atleast_2d(t3_cond_prompt_tokens).to(self.device)
+
+        ve_embed = torch.from_numpy(
+            self.model.ve.embeds_from_wavs([ref_16k_wav], sample_rate=S3_SR).astype(np.float32)
+        )
+        ve_embed = ve_embed.mean(axis=0, keepdim=True).to(self.device)
+
+        from chatterbox.tts_turbo import T3Cond, Conditionals
+        t3_cond = T3Cond(
+            speaker_emb=ve_embed,
+            cond_prompt_speech_tokens=t3_cond_prompt_tokens,
+            emotion_adv=exaggeration * torch.ones(1, 1, 1),
+        ).to(device=self.device)
+        self.model.conds = Conditionals(t3_cond, s3gen_ref_dict)
+        self.model.conds.save(Path(output_path))
 
         _LOGGER.info("Conditionals computed in %.1fs", time.monotonic() - start)
 
