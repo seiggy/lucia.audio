@@ -180,3 +180,35 @@ class EngineManager:
             top_k=top_k,
             repetition_penalty=repetition_penalty,
         )
+
+    async def synthesize_streaming(
+        self,
+        text: str,
+        engine_id: Optional[str] = None,
+        voice_conds_path: Optional[Path] = None,
+        audio_prompt_path: Optional[str] = None,
+        ref_text: str = "",
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 1000,
+        repetition_penalty: float = 1.2,
+    ):
+        """Async generator yielding (audio_np, sample_rate) chunks."""
+        engine = self.get_engine(engine_id)
+        if engine is None:
+            raise RuntimeError(f"No engine available (active: {self._active_engine_id})")
+
+        if not hasattr(engine, 'synthesize_streaming'):
+            raise RuntimeError(f"Engine {engine.ENGINE_NAME} does not support streaming")
+
+        async for chunk in engine.synthesize_streaming(
+            text=text,
+            voice_conds_path=voice_conds_path,
+            audio_prompt_path=audio_prompt_path,
+            ref_text=ref_text,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+            repetition_penalty=repetition_penalty,
+        ):
+            yield chunk

@@ -89,6 +89,61 @@ class Qwen3Engine:
                 temperature, top_p, top_k, repetition_penalty,
             )
 
+    async def synthesize_streaming(
+        self,
+        text: str,
+        voice_conds_path: Optional[Path] = None,
+        audio_prompt_path: Optional[str] = None,
+        ref_text: str = "",
+        temperature: float = 0.9,
+        top_p: float = 1.0,
+        top_k: int = 50,
+        repetition_penalty: float = 1.05,
+        chunk_tokens: int = 8,
+        **kwargs,
+    ):
+        """Async generator yielding (audio_np, sample_rate) chunks via Qwen3 streaming."""
+        import queue
+        import threading
+
+        async with self._inference_lock:
+            if not audio_prompt_path or not Path(audio_prompt_path).exists():
+                raise RuntimeError("Qwen3 streaming requires reference audio")
+
+            loop = asyncio.get_event_loop()
+            q = queue.Queue()
+            error_holder = [None]
+
+            def _run():
+                try:
+                    for audio_chunk, sr, timing in self.model.generate_voice_clone_streaming(
+                        text=text,
+                        language="English",
+                        ref_audio=str(audio_prompt_path),
+                        ref_text=ref_text or "",
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                        chunk_size=chunk_tokens,
+                    ):
+                        q.put((audio_chunk.flatten().astype(np.float32), sr))
+                    q.put(None)
+                except Exception as e:
+                    error_holder[0] = e
+                    q.put(None)
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    if error_holder[0]:
+                        raise error_holder[0]
+                    break
+                yield item
+
     def _synthesize_sync(
         self, text, audio_prompt_path, ref_text,
         temperature, top_p, top_k, repetition_penalty,

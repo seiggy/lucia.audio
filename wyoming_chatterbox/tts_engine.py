@@ -114,6 +114,67 @@ class ChatterboxEngine:
                 temperature, top_p, top_k, repetition_penalty,
             )
 
+    async def synthesize_streaming(
+        self,
+        text: str,
+        voice_conds_path: Optional[Path] = None,
+        audio_prompt_path: Optional[str] = None,
+        temperature: float = 0.8,
+        top_p: float = 0.95,
+        top_k: int = 1000,
+        repetition_penalty: float = 1.2,
+        chunk_tokens: int = 25,
+    ):
+        """Async generator yielding (audio_np, sample_rate) chunks during synthesis."""
+        from .streaming import generate_streaming
+        from chatterbox.tts_turbo import Conditionals
+
+        async with self._inference_lock:
+            # Load conditionals
+            if voice_conds_path and voice_conds_path.exists():
+                conds = Conditionals.load(voice_conds_path, map_location=self.device)
+                self.model.conds = conds
+
+            if self.model.conds is None:
+                raise RuntimeError("No voice conditionals loaded")
+
+            loop = asyncio.get_event_loop()
+
+            # Run the synchronous generator in a thread, yielding chunks
+            import queue
+            import threading
+
+            q = queue.Queue()
+            error_holder = [None]
+
+            def _run():
+                try:
+                    gen = generate_streaming(
+                        self.model, text,
+                        chunk_tokens=chunk_tokens,
+                        temperature=temperature,
+                        top_k=top_k,
+                        top_p=top_p,
+                        repetition_penalty=repetition_penalty,
+                    )
+                    for chunk_audio, sr in gen:
+                        q.put((chunk_audio, sr))
+                    q.put(None)  # sentinel
+                except Exception as e:
+                    error_holder[0] = e
+                    q.put(None)
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+
+            while True:
+                item = await loop.run_in_executor(None, q.get)
+                if item is None:
+                    if error_holder[0]:
+                        raise error_holder[0]
+                    break
+                yield item
+
     def _synthesize_sync(
         self, text, voice_conds_path, audio_prompt_path,
         temperature, top_p, top_k, repetition_penalty,
