@@ -443,6 +443,116 @@ footer a:hover {
     background: rgba(46, 204, 113, 0.06);
 }
 
+/* Benchmark chart */
+.bench-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 200px;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+}
+
+.bench-chart-group {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 100%;
+    position: relative;
+}
+
+.bench-chart-bar {
+    flex: 1;
+    border-radius: 3px 3px 0 0;
+    min-height: 2px;
+    position: relative;
+    transition: height 0.3s;
+    cursor: default;
+}
+
+.bench-chart-bar:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.6875rem;
+    white-space: nowrap;
+    z-index: 10;
+    pointer-events: none;
+}
+
+.bench-chart-label {
+    position: absolute;
+    bottom: -1.5rem;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font-size: 0.5625rem;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bench-chart-legend {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+    margin-top: 1.75rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+}
+
+.bench-chart-legend-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-right: 0.25rem;
+    vertical-align: middle;
+}
+
+/* Sample cards */
+.bench-sample-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 0.5rem;
+    font-size: 0.8125rem;
+}
+
+.bench-sample-text {
+    flex: 1;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.bench-sample-metrics {
+    display: flex;
+    gap: 1rem;
+    flex-shrink: 0;
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 0.75rem;
+}
+
+.bench-sample-audio audio {
+    height: 28px;
+    width: 140px;
+}
+
 /* Responsive */
 @media (max-width: 640px) {
     .form-row {

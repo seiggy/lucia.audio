@@ -205,19 +205,29 @@
                 </button>
             </form>
             <div id="bench-results" style="display:none; margin-top: 1rem;">
+                <!-- Summary table -->
+                <h3 style="font-size: 0.9375rem; margin-bottom: 0.5rem;">Summary</h3>
                 <table class="bench-table">
                     <thead>
                         <tr>
                             <th>Engine</th>
+                            <th>Avg RTF</th>
+                            <th>Avg Time</th>
+                            <th>Total Audio</th>
                             <th>Total Time</th>
-                            <th>Audio Length</th>
-                            <th>RTF</th>
                             <th>VRAM Peak</th>
-                            <th>Listen</th>
                         </tr>
                     </thead>
-                    <tbody id="bench-tbody"></tbody>
+                    <tbody id="bench-summary"></tbody>
                 </table>
+
+                <!-- Per-sample chart -->
+                <h3 style="font-size: 0.9375rem; margin: 1rem 0 0.5rem;">RTF by Sample Length</h3>
+                <div class="bench-chart" id="bench-chart"></div>
+
+                <!-- Per-sample details with audio -->
+                <h3 style="font-size: 0.9375rem; margin: 1rem 0 0.5rem;">Sample Details</h3>
+                <div id="bench-samples"></div>
             </div>
         </section>
     </main>

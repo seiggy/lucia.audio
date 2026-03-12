@@ -375,6 +375,8 @@ async function activateEngine(engineId) {
 updateEngineUI(window.ACTIVE_ENGINE);
 
 // ─── Benchmark ───
+const ENGINE_COLORS = ['#6c5ce7', '#00cec9', '#fdcb6e', '#e17055', '#74b9ff'];
+
 document.getElementById('bench-form').addEventListener('submit', async function(e) {
     e.preventDefault();
 
@@ -382,13 +384,11 @@ document.getElementById('bench-form').addEventListener('submit', async function(
     const btnText = btn.querySelector('.btn-text');
     const btnLoading = btn.querySelector('.btn-loading');
     const resultsDiv = document.getElementById('bench-results');
-    const tbody = document.getElementById('bench-tbody');
 
     btn.disabled = true;
     btnText.style.display = 'none';
     btnLoading.style.display = 'inline';
     resultsDiv.style.display = 'none';
-    tbody.innerHTML = '';
 
     const formData = new FormData(this);
 
@@ -404,38 +404,7 @@ document.getElementById('bench-form').addEventListener('submit', async function(
         }
 
         const results = await resp.json();
-
-        // Find the winner (lowest total_time_ms among non-errors)
-        const valid = results.filter(r => !r.error);
-        const fastestTime = valid.length ? Math.min(...valid.map(r => r.total_time_ms)) : 0;
-
-        for (const r of results) {
-            const tr = document.createElement('tr');
-            if (!r.error && r.total_time_ms === fastestTime && valid.length > 1) {
-                tr.classList.add('bench-winner');
-            }
-
-            if (r.error) {
-                tr.innerHTML = `
-                    <td><strong>${r.engine_name}</strong></td>
-                    <td colspan="5" class="bench-error">Error: ${r.error}</td>
-                `;
-            } else {
-                const rtfClass = r.rtf >= 2 ? 'rtf-good' : r.rtf >= 1 ? 'rtf-ok' : 'rtf-slow';
-                const audioSrc = `data:audio/wav;base64,${r.audio_b64}`;
-                tr.innerHTML = `
-                    <td><strong>${r.engine_name}</strong></td>
-                    <td>${r.total_time_ms.toFixed(0)} ms</td>
-                    <td>${r.audio_duration_s.toFixed(2)}s</td>
-                    <td class="${rtfClass}">${r.rtf.toFixed(2)}x</td>
-                    <td>${r.vram_peak_mb.toFixed(0)} MB</td>
-                    <td><audio controls src="${audioSrc}" preload="none"></audio></td>
-                `;
-            }
-
-            tbody.appendChild(tr);
-        }
-
+        renderBenchmarkResults(results);
         resultsDiv.style.display = 'block';
     } catch (err) {
         alert('Benchmark error: ' + err.message);
@@ -445,3 +414,93 @@ document.getElementById('bench-form').addEventListener('submit', async function(
         btnLoading.style.display = 'none';
     }
 });
+
+function renderBenchmarkResults(results) {
+    // Summary table
+    const summary = document.getElementById('bench-summary');
+    summary.innerHTML = '';
+    const bestRtf = Math.max(...results.filter(r => !r.error).map(r => r.avg_rtf));
+
+    for (const r of results) {
+        const tr = document.createElement('tr');
+        if (!r.error && r.avg_rtf === bestRtf && results.filter(x => !x.error).length > 1) {
+            tr.classList.add('bench-winner');
+        }
+        if (r.error) {
+            tr.innerHTML = `<td><strong>${r.engine_name}</strong></td><td colspan="5" class="bench-error">${r.error}</td>`;
+        } else {
+            const rtfClass = r.avg_rtf >= 2 ? 'rtf-good' : r.avg_rtf >= 1 ? 'rtf-ok' : 'rtf-slow';
+            tr.innerHTML = `
+                <td><strong>${r.engine_name}</strong></td>
+                <td class="${rtfClass}">${r.avg_rtf.toFixed(2)}x</td>
+                <td>${r.avg_time_ms.toFixed(0)} ms</td>
+                <td>${r.total_audio_s.toFixed(1)}s</td>
+                <td>${r.total_time_ms.toFixed(0)} ms</td>
+                <td>${r.vram_peak_mb.toFixed(0)} MB</td>
+            `;
+        }
+        summary.appendChild(tr);
+    }
+
+    // RTF bar chart
+    const chart = document.getElementById('bench-chart');
+    chart.innerHTML = '';
+    const validEngines = results.filter(r => !r.error && r.samples.length > 0);
+    if (validEngines.length === 0) return;
+
+    const maxRtf = Math.max(...validEngines.flatMap(r => r.samples.filter(s => !s.error).map(s => s.rtf)), 1);
+    const sampleCount = validEngines[0].samples.length;
+
+    for (let i = 0; i < sampleCount; i++) {
+        const group = document.createElement('div');
+        group.className = 'bench-chart-group';
+
+        for (let ei = 0; ei < validEngines.length; ei++) {
+            const sample = validEngines[ei].samples[i];
+            const bar = document.createElement('div');
+            bar.className = 'bench-chart-bar';
+            bar.style.background = ENGINE_COLORS[ei % ENGINE_COLORS.length];
+            const rtf = sample && !sample.error ? sample.rtf : 0;
+            bar.style.height = (rtf / maxRtf * 100) + '%';
+            bar.dataset.tooltip = `${validEngines[ei].engine_name}: ${rtf.toFixed(2)}x RTF (${sample ? sample.char_count : 0} chars)`;
+            group.appendChild(bar);
+        }
+
+        const label = document.createElement('div');
+        label.className = 'bench-chart-label';
+        const chars = validEngines[0].samples[i]?.char_count || 0;
+        label.textContent = `${chars}ch`;
+        group.appendChild(label);
+        chart.appendChild(group);
+    }
+
+    // Legend
+    const legend = document.createElement('div');
+    legend.className = 'bench-chart-legend';
+    for (let ei = 0; ei < validEngines.length; ei++) {
+        legend.innerHTML += `<span><span class="bench-chart-legend-dot" style="background:${ENGINE_COLORS[ei]}"></span>${validEngines[ei].engine_name}</span>`;
+    }
+    chart.parentNode.insertBefore(legend, chart.nextSibling);
+
+    // Per-sample details
+    const samplesDiv = document.getElementById('bench-samples');
+    samplesDiv.innerHTML = '';
+    for (let i = 0; i < sampleCount; i++) {
+        for (let ei = 0; ei < validEngines.length; ei++) {
+            const s = validEngines[ei].samples[i];
+            if (!s || s.error) continue;
+            const row = document.createElement('div');
+            row.className = 'bench-sample-row';
+            row.style.borderLeft = `3px solid ${ENGINE_COLORS[ei]}`;
+            row.innerHTML = `
+                <span class="bench-sample-text" title="${s.text}">${s.text}</span>
+                <span class="bench-sample-metrics">
+                    <span>${s.total_time_ms.toFixed(0)}ms</span>
+                    <span class="${s.rtf >= 2 ? 'rtf-good' : s.rtf >= 1 ? 'rtf-ok' : 'rtf-slow'}">${s.rtf.toFixed(2)}x</span>
+                </span>
+                <span class="bench-sample-audio"><audio controls src="data:audio/wav;base64,${s.audio_b64}" preload="none"></audio></span>
+            `;
+            samplesDiv.appendChild(row);
+        }
+    }
+}

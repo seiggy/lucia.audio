@@ -1,12 +1,11 @@
-"""Benchmark runner — measures TTS engine performance metrics."""
+"""Benchmark runner — measures TTS engine performance across multiple samples."""
 
-import asyncio
 import base64
 import io
 import logging
 import time
 import wave
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Optional
 
@@ -14,59 +13,57 @@ import torch
 
 _LOGGER = logging.getLogger(__name__)
 
+BENCHMARK_SENTENCES = [
+    "Hello, how are you today?",
+    "The quick brown fox jumps over the lazy dog near the riverbank.",
+    "I wanted to let you know that your appointment has been rescheduled to next Thursday at three thirty in the afternoon.",
+    "In a world where technology continues to evolve at an unprecedented pace, it becomes increasingly important to consider the ethical implications of artificial intelligence and its impact on society as a whole.",
+    "Ladies and gentlemen, welcome aboard flight seven twenty three with non-stop service to San Francisco. Our estimated flight time today is five hours and forty two minutes. We'll be cruising at an altitude of thirty six thousand feet. Please make sure your seatbelts are fastened, your tray tables are stowed, and your seat backs are in the upright position for takeoff.",
+]
+
 
 @dataclass
-class BenchmarkResult:
-    engine_id: str
-    engine_name: str
+class SampleResult:
+    text: str
+    char_count: int
     total_time_ms: float
     audio_duration_s: float
-    rtf: float  # audio_duration / generation_time — >1.0 = faster than realtime
-    vram_peak_mb: float
-    vram_allocated_mb: float
-    sample_rate: int
-    audio_b64: str  # base64-encoded WAV for playback
+    rtf: float
+    audio_b64: str  # base64 WAV
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
         return asdict(self)
 
 
+@dataclass
+class EngineBenchmarkResult:
+    engine_id: str
+    engine_name: str
+    samples: List[SampleResult]
+    avg_rtf: float
+    avg_time_ms: float
+    total_audio_s: float
+    total_time_ms: float
+    vram_peak_mb: float
+    vram_allocated_mb: float
+    error: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        d = asdict(self)
+        return d
+
+
 def _wav_duration(wav_bytes: bytes) -> tuple[float, int]:
     """Return (duration_seconds, sample_rate) from WAV bytes."""
     with io.BytesIO(wav_bytes) as buf:
         with wave.open(buf, "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            return frames / rate, rate
+            return wf.getnframes() / wf.getframerate(), wf.getframerate()
 
 
-async def run_single_benchmark(
-    engine,
-    text: str,
-    voice_conds_path: Optional[Path] = None,
-    audio_prompt_path: Optional[str] = None,
-) -> BenchmarkResult:
-    """Benchmark a single engine: synthesize text and capture metrics."""
-    engine_id = engine.ENGINE_ID
-    engine_name = engine.ENGINE_NAME
-
-    if engine._model is None:
-        return BenchmarkResult(
-            engine_id=engine_id, engine_name=engine_name,
-            total_time_ms=0, audio_duration_s=0, rtf=0,
-            vram_peak_mb=0, vram_allocated_mb=0, sample_rate=0,
-            audio_b64="", error="Model not loaded",
-        )
-
-    # Reset CUDA memory stats
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.synchronize()
-
-    _LOGGER.info("Benchmarking %s...", engine_name)
+async def _run_sample(engine, text, voice_conds_path, audio_prompt_path) -> SampleResult:
+    """Run a single synthesis sample and capture timing."""
     start = time.monotonic()
-
     try:
         wav_bytes = await engine.synthesize(
             text=text,
@@ -74,48 +71,26 @@ async def run_single_benchmark(
             audio_prompt_path=audio_prompt_path,
         )
     except Exception as e:
-        _LOGGER.error("Benchmark failed for %s: %s", engine_name, e)
-        return BenchmarkResult(
-            engine_id=engine_id, engine_name=engine_name,
+        return SampleResult(
+            text=text, char_count=len(text),
             total_time_ms=0, audio_duration_s=0, rtf=0,
-            vram_peak_mb=0, vram_allocated_mb=0, sample_rate=0,
             audio_b64="", error=str(e),
         )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
-    total_time = time.monotonic() - start
-    total_time_ms = total_time * 1000
-
-    # VRAM stats
-    vram_peak_mb = 0.0
-    vram_allocated_mb = 0.0
-    if torch.cuda.is_available():
-        vram_peak_mb = torch.cuda.max_memory_allocated() / (1024 * 1024)
-        vram_allocated_mb = torch.cuda.memory_allocated() / (1024 * 1024)
-
-    # Audio duration
-    audio_duration_s, sample_rate = _wav_duration(wav_bytes)
-    rtf = audio_duration_s / total_time if total_time > 0 else 0
-
-    # Base64 audio for playback
+    elapsed = time.monotonic() - start
+    elapsed_ms = elapsed * 1000
+    audio_s, _ = _wav_duration(wav_bytes)
+    rtf = audio_s / elapsed if elapsed > 0 else 0
     audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
 
-    _LOGGER.info(
-        "Benchmark %s: %.0fms total, %.2fs audio, RTF=%.2f, VRAM=%.0fMB peak",
-        engine_name, total_time_ms, audio_duration_s, rtf, vram_peak_mb,
-    )
-
-    return BenchmarkResult(
-        engine_id=engine_id,
-        engine_name=engine_name,
-        total_time_ms=round(total_time_ms, 1),
-        audio_duration_s=round(audio_duration_s, 2),
+    return SampleResult(
+        text=text, char_count=len(text),
+        total_time_ms=round(elapsed_ms, 1),
+        audio_duration_s=round(audio_s, 2),
         rtf=round(rtf, 2),
-        vram_peak_mb=round(vram_peak_mb, 1),
-        vram_allocated_mb=round(vram_allocated_mb, 1),
-        sample_rate=sample_rate,
         audio_b64=audio_b64,
     )
 
@@ -125,9 +100,16 @@ async def run_comparative_benchmark(
     text: str,
     voice_id: Optional[str],
     voice_manager,
-) -> List[BenchmarkResult]:
-    """Run benchmarks across all loaded engines sequentially."""
+) -> List[EngineBenchmarkResult]:
+    """Run multi-sample benchmarks across all engines sequentially.
+
+    Uses BENCHMARK_SENTENCES for varied-length samples.
+    The user's custom text is prepended as the first sample.
+    """
     results = []
+
+    # Build sample list: user text + built-in sentences
+    sentences = [text] + BENCHMARK_SENTENCES
 
     # Resolve voice paths
     conds_path = None
@@ -144,7 +126,6 @@ async def run_comparative_benchmark(
     audio_prompt = str(audio_path) if audio_path else None
 
     for engine_id, engine in engine_mgr.engines.items():
-        # Clear cache between runs for fair measurement
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
@@ -155,15 +136,16 @@ async def run_comparative_benchmark(
             try:
                 await engine.load_model()
             except Exception as e:
-                results.append(BenchmarkResult(
+                results.append(EngineBenchmarkResult(
                     engine_id=engine_id, engine_name=engine.ENGINE_NAME,
-                    total_time_ms=0, audio_duration_s=0, rtf=0,
-                    vram_peak_mb=0, vram_allocated_mb=0, sample_rate=0,
-                    audio_b64="", error=f"Failed to load: {e}",
+                    samples=[], avg_rtf=0, avg_time_ms=0,
+                    total_audio_s=0, total_time_ms=0,
+                    vram_peak_mb=0, vram_allocated_mb=0,
+                    error=f"Failed to load: {e}",
                 ))
                 continue
 
-        # Warm up with a throwaway synthesis (don't count this)
+        # Warm up (throwaway)
         _LOGGER.info("Warm-up run for %s...", engine.ENGINE_NAME)
         try:
             await engine.synthesize(
@@ -172,19 +154,50 @@ async def run_comparative_benchmark(
                 audio_prompt_path=audio_prompt,
             )
         except Exception as e:
-            _LOGGER.warning("Warm-up failed for %s (non-fatal): %s", engine.ENGINE_NAME, e)
+            _LOGGER.warning("Warm-up failed for %s: %s", engine.ENGINE_NAME, e)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+            torch.cuda.reset_peak_memory_stats()
 
-        result = await run_single_benchmark(
-            engine, text,
-            voice_conds_path=conds_path,
-            audio_prompt_path=audio_prompt,
+        # Run all samples
+        _LOGGER.info("Running %d samples on %s...", len(sentences), engine.ENGINE_NAME)
+        samples = []
+        for i, sentence in enumerate(sentences):
+            _LOGGER.info("  Sample %d/%d (%d chars)", i + 1, len(sentences), len(sentence))
+            result = await _run_sample(engine, sentence, conds_path, audio_prompt)
+            samples.append(result)
+
+        # Aggregate
+        valid = [s for s in samples if not s.error]
+        avg_rtf = sum(s.rtf for s in valid) / len(valid) if valid else 0
+        avg_time = sum(s.total_time_ms for s in valid) / len(valid) if valid else 0
+        total_audio = sum(s.audio_duration_s for s in valid)
+        total_time = sum(s.total_time_ms for s in valid)
+
+        vram_peak = 0.0
+        vram_alloc = 0.0
+        if torch.cuda.is_available():
+            vram_peak = torch.cuda.max_memory_allocated() / (1024 * 1024)
+            vram_alloc = torch.cuda.memory_allocated() / (1024 * 1024)
+
+        _LOGGER.info(
+            "Benchmark %s: avg RTF=%.2f, avg time=%.0fms, VRAM=%.0fMB",
+            engine.ENGINE_NAME, avg_rtf, avg_time, vram_peak,
         )
-        results.append(result)
 
-        # Unload if we loaded it just for the benchmark
+        results.append(EngineBenchmarkResult(
+            engine_id=engine_id,
+            engine_name=engine.ENGINE_NAME,
+            samples=samples,
+            avg_rtf=round(avg_rtf, 2),
+            avg_time_ms=round(avg_time, 1),
+            total_audio_s=round(total_audio, 2),
+            total_time_ms=round(total_time, 1),
+            vram_peak_mb=round(vram_peak, 1),
+            vram_allocated_mb=round(vram_alloc, 1),
+        ))
+
         if not was_loaded:
             _LOGGER.info("Unloading %s after benchmark", engine.ENGINE_NAME)
             await engine.unload_model()
