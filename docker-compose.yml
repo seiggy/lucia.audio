@@ -14,13 +14,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - HF_HOME=/data/hf-cache
       - HF_TOKEN=${HF_TOKEN}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    gpus: all
+    runtime: nvidia
     # Override CMD for custom settings:
     # command: >
     #   --uri tcp://0.0.0.0:10200
