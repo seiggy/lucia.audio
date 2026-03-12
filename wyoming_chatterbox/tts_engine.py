@@ -125,14 +125,13 @@ class ChatterboxEngine:
         top_p: float = 0.95,
         top_k: int = 1000,
         repetition_penalty: float = 1.2,
-        chunk_tokens: int = 25,
+        **kwargs,
     ):
-        """Async generator yielding (audio_np, sample_rate) chunks during synthesis."""
+        """Async generator yielding (audio_np, sample_rate) per sentence."""
         from .streaming import generate_streaming
         from chatterbox.tts_turbo import Conditionals
 
         async with self._inference_lock:
-            # Load conditionals
             if voice_conds_path and voice_conds_path.exists():
                 conds = Conditionals.load(voice_conds_path, map_location=self.device)
                 self.model.conds = conds
@@ -141,27 +140,21 @@ class ChatterboxEngine:
                 raise RuntimeError("No voice conditionals loaded")
 
             loop = asyncio.get_event_loop()
-
-            # Run the synchronous generator in a thread, yielding chunks
-            import queue
-            import threading
+            import queue, threading
 
             q = queue.Queue()
             error_holder = [None]
 
             def _run():
                 try:
-                    gen = generate_streaming(
+                    for chunk_audio, sr in generate_streaming(
                         self.model, text,
-                        chunk_tokens=chunk_tokens,
                         temperature=temperature,
-                        top_k=top_k,
-                        top_p=top_p,
+                        top_k=top_k, top_p=top_p,
                         repetition_penalty=repetition_penalty,
-                    )
-                    for chunk_audio, sr in gen:
+                    ):
                         q.put((chunk_audio, sr))
-                    q.put(None)  # sentinel
+                    q.put(None)
                 except Exception as e:
                     error_holder[0] = e
                     q.put(None)
