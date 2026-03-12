@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -20,9 +20,16 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 
 WORKDIR /app
 
-# Install PyTorch with CUDA 12.4 support first (layer cached)
+# Install PyTorch 2.7+ with CUDA 12.8 (sm_120 / Blackwell support)
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Install chatterbox-tts without its pinned torch==2.6.0 dep, then its other deps
+RUN pip install --no-deps "chatterbox-tts>=0.1.6" && \
+    pip install "numpy>=1.24.0,<1.26.0" librosa==0.11.0 s3tokenizer \
+    "transformers==4.46.3" "diffusers==0.29.0" "resemble-perth==1.0.1" \
+    "conformer==0.3.2" "safetensors==0.5.3" spacy-pkuseg "pykakasi==2.3.0" \
+    pyloudnorm omegaconf huggingface_hub
 
 # Install Python dependencies (layer caching for faster rebuilds)
 COPY pyproject.toml README.md ./
