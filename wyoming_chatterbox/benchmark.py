@@ -9,6 +9,7 @@ from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import List, Optional
 
+import numpy as np
 import torch
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class SampleResult:
     text: str
     char_count: int
     total_time_ms: float
+    ttfa_ms: float  # time to first audio chunk (0 if non-streaming)
     audio_duration_s: float
     rtf: float
     audio_b64: str  # base64 WAV
@@ -43,6 +45,7 @@ class EngineBenchmarkResult:
     samples: List[SampleResult]
     avg_rtf: float
     avg_time_ms: float
+    avg_ttfa_ms: float
     total_audio_s: float
     total_time_ms: float
     vram_peak_mb: float
@@ -50,8 +53,7 @@ class EngineBenchmarkResult:
     error: Optional[str] = None
 
     def to_dict(self) -> dict:
-        d = asdict(self)
-        return d
+        return asdict(self)
 
 
 def _wav_duration(wav_bytes: bytes) -> tuple[float, int]:
@@ -62,36 +64,79 @@ def _wav_duration(wav_bytes: bytes) -> tuple[float, int]:
 
 
 async def _run_sample(engine, text, voice_conds_path, audio_prompt_path) -> SampleResult:
-    """Run a single synthesis sample and capture timing."""
+    """Run a single synthesis sample, using streaming to measure TTFA."""
+    from .tts_engine import audio_to_wav_bytes
+
     start = time.monotonic()
+    ttfa = 0.0
+    audio_chunks = []
+    sample_rate = 24000
+
+    # Try streaming first to get TTFA
     try:
-        wav_bytes = await engine.synthesize(
+        first_chunk = True
+        async for audio_np, sr in engine.synthesize_streaming(
             text=text,
             voice_conds_path=voice_conds_path,
             audio_prompt_path=audio_prompt_path,
-        )
-    except Exception as e:
-        return SampleResult(
-            text=text, char_count=len(text),
-            total_time_ms=0, audio_duration_s=0, rtf=0,
-            audio_b64="", error=str(e),
-        )
+        ):
+            if first_chunk:
+                ttfa = (time.monotonic() - start) * 1000
+                first_chunk = True  # already set, just mark timing
+                first_chunk = False
+                sample_rate = sr
+            audio_chunks.append(audio_np)
+    except Exception:
+        # Fall back to non-streaming
+        try:
+            wav_bytes = await engine.synthesize(
+                text=text,
+                voice_conds_path=voice_conds_path,
+                audio_prompt_path=audio_prompt_path,
+            )
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+            elapsed = time.monotonic() - start
+            audio_s, sr = _wav_duration(wav_bytes)
+            return SampleResult(
+                text=text, char_count=len(text),
+                total_time_ms=round(elapsed * 1000, 1),
+                ttfa_ms=round(elapsed * 1000, 1),  # no streaming = TTFA equals total
+                audio_duration_s=round(audio_s, 2),
+                rtf=round(audio_s / elapsed if elapsed > 0 else 0, 2),
+                audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
+            )
+        except Exception as e:
+            return SampleResult(
+                text=text, char_count=len(text),
+                total_time_ms=0, ttfa_ms=0, audio_duration_s=0, rtf=0,
+                audio_b64="", error=str(e),
+            )
 
     if torch.cuda.is_available():
         torch.cuda.synchronize()
 
     elapsed = time.monotonic() - start
     elapsed_ms = elapsed * 1000
-    audio_s, _ = _wav_duration(wav_bytes)
+
+    # Combine chunks into one WAV
+    if audio_chunks:
+        combined = np.concatenate([c.flatten() for c in audio_chunks])
+        wav_bytes = audio_to_wav_bytes(combined, sample_rate)
+        audio_s = len(combined) / sample_rate
+    else:
+        wav_bytes = audio_to_wav_bytes(np.zeros(1, dtype=np.float32), sample_rate)
+        audio_s = 0
+
     rtf = audio_s / elapsed if elapsed > 0 else 0
-    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
 
     return SampleResult(
         text=text, char_count=len(text),
         total_time_ms=round(elapsed_ms, 1),
+        ttfa_ms=round(ttfa, 1),
         audio_duration_s=round(audio_s, 2),
         rtf=round(rtf, 2),
-        audio_b64=audio_b64,
+        audio_b64=base64.b64encode(wav_bytes).decode("ascii"),
     )
 
 
@@ -172,6 +217,7 @@ async def run_comparative_benchmark(
         valid = [s for s in samples if not s.error]
         avg_rtf = sum(s.rtf for s in valid) / len(valid) if valid else 0
         avg_time = sum(s.total_time_ms for s in valid) / len(valid) if valid else 0
+        avg_ttfa = sum(s.ttfa_ms for s in valid) / len(valid) if valid else 0
         total_audio = sum(s.audio_duration_s for s in valid)
         total_time = sum(s.total_time_ms for s in valid)
 
@@ -182,8 +228,8 @@ async def run_comparative_benchmark(
             vram_alloc = torch.cuda.memory_allocated() / (1024 * 1024)
 
         _LOGGER.info(
-            "Benchmark %s: avg RTF=%.2f, avg time=%.0fms, VRAM=%.0fMB",
-            engine.ENGINE_NAME, avg_rtf, avg_time, vram_peak,
+            "Benchmark %s: avg RTF=%.2f, avg TTFA=%.0fms, avg time=%.0fms, VRAM=%.0fMB",
+            engine.ENGINE_NAME, avg_rtf, avg_ttfa, avg_time, vram_peak,
         )
 
         results.append(EngineBenchmarkResult(
@@ -192,6 +238,7 @@ async def run_comparative_benchmark(
             samples=samples,
             avg_rtf=round(avg_rtf, 2),
             avg_time_ms=round(avg_time, 1),
+            avg_ttfa_ms=round(avg_ttfa, 1),
             total_audio_s=round(total_audio, 2),
             total_time_ms=round(total_time, 1),
             vram_peak_mb=round(vram_peak, 1),

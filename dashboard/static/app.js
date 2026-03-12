@@ -430,12 +430,13 @@ function renderBenchmarkResults(results) {
             tr.classList.add('bench-winner');
         }
         if (r.error) {
-            tr.innerHTML = `<td><strong>${r.engine_name}</strong></td><td colspan="5" class="bench-error">${r.error}</td>`;
+            tr.innerHTML = `<td><strong>${r.engine_name}</strong></td><td colspan="6" class="bench-error">${r.error}</td>`;
         } else {
             const rtfClass = r.avg_rtf >= 2 ? 'rtf-good' : r.avg_rtf >= 1 ? 'rtf-ok' : 'rtf-slow';
             tr.innerHTML = `
                 <td><strong>${r.engine_name}</strong></td>
                 <td class="${rtfClass}">${r.avg_rtf.toFixed(2)}x</td>
+                <td><strong>${r.avg_ttfa_ms.toFixed(0)} ms</strong></td>
                 <td>${r.avg_time_ms.toFixed(0)} ms</td>
                 <td>${r.total_audio_s.toFixed(1)}s</td>
                 <td>${r.total_time_ms.toFixed(0)} ms</td>
@@ -498,7 +499,8 @@ function renderBenchmarkResults(results) {
             row.innerHTML = `
                 <span class="bench-sample-text" title="${s.text}">${s.text}</span>
                 <span class="bench-sample-metrics">
-                    <span>${s.total_time_ms.toFixed(0)}ms</span>
+                    <span title="TTFA">⚡${s.ttfa_ms.toFixed(0)}ms</span>
+                    <span title="Total">${s.total_time_ms.toFixed(0)}ms</span>
                     <span class="${s.rtf >= 2 ? 'rtf-good' : s.rtf >= 1 ? 'rtf-ok' : 'rtf-slow'}">${s.rtf.toFixed(2)}x</span>
                 </span>
                 <span class="bench-sample-audio"><audio controls src="data:audio/wav;base64,${s.audio_b64}" preload="none"></audio></span>
