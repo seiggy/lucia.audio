@@ -326,3 +326,106 @@ footer a:hover {
         gap: 0.25rem;
     }
 }
+
+/* Audio source tabs */
+.audio-source-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.tab-btn {
+    flex: 1;
+    padding: 0.5rem 1rem;
+    background: var(--bg-input);
+    border: none;
+    color: var(--text-dim);
+    font-size: 0.875rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.tab-btn:not(:last-child) {
+    border-right: 1px solid var(--border);
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Recorder */
+.recorder {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.btn-record {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 0.875rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.btn-record:hover {
+    border-color: var(--accent);
+}
+
+.btn-record.recording {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: white;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.record-timer {
+    font-family: 'SF Mono', 'Cascadia Code', monospace;
+    font-size: 0.9375rem;
+    color: var(--text-dim);
+    min-width: 3.5rem;
+}
+
+.record-level-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--bg);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.record-level-fill {
+    height: 100%;
+    width: 0%;
+    background: var(--success);
+    border-radius: 3px;
+    transition: width 0.1s;
+}
