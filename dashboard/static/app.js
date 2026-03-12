@@ -373,3 +373,75 @@ async function activateEngine(engineId) {
 
 // Initialize engine-specific UI on load
 updateEngineUI(window.ACTIVE_ENGINE);
+
+// ─── Benchmark ───
+document.getElementById('bench-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+
+    const btn = document.getElementById('bench-btn');
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    const resultsDiv = document.getElementById('bench-results');
+    const tbody = document.getElementById('bench-tbody');
+
+    btn.disabled = true;
+    btnText.style.display = 'none';
+    btnLoading.style.display = 'inline';
+    resultsDiv.style.display = 'none';
+    tbody.innerHTML = '';
+
+    const formData = new FormData(this);
+
+    try {
+        const resp = await fetch('/api/benchmark', {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Benchmark failed');
+        }
+
+        const results = await resp.json();
+
+        // Find the winner (lowest total_time_ms among non-errors)
+        const valid = results.filter(r => !r.error);
+        const fastestTime = valid.length ? Math.min(...valid.map(r => r.total_time_ms)) : 0;
+
+        for (const r of results) {
+            const tr = document.createElement('tr');
+            if (!r.error && r.total_time_ms === fastestTime && valid.length > 1) {
+                tr.classList.add('bench-winner');
+            }
+
+            if (r.error) {
+                tr.innerHTML = `
+                    <td><strong>${r.engine_name}</strong></td>
+                    <td colspan="5" class="bench-error">Error: ${r.error}</td>
+                `;
+            } else {
+                const rtfClass = r.rtf >= 2 ? 'rtf-good' : r.rtf >= 1 ? 'rtf-ok' : 'rtf-slow';
+                const audioSrc = `data:audio/wav;base64,${r.audio_b64}`;
+                tr.innerHTML = `
+                    <td><strong>${r.engine_name}</strong></td>
+                    <td>${r.total_time_ms.toFixed(0)} ms</td>
+                    <td>${r.audio_duration_s.toFixed(2)}s</td>
+                    <td class="${rtfClass}">${r.rtf.toFixed(2)}x</td>
+                    <td>${r.vram_peak_mb.toFixed(0)} MB</td>
+                    <td><audio controls src="${audioSrc}" preload="none"></audio></td>
+                `;
+            }
+
+            tbody.appendChild(tr);
+        }
+
+        resultsDiv.style.display = 'block';
+    } catch (err) {
+        alert('Benchmark error: ' + err.message);
+    } finally {
+        btn.disabled = false;
+        btnText.style.display = 'inline';
+        btnLoading.style.display = 'none';
+    }
+});

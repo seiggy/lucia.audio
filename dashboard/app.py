@@ -226,6 +226,25 @@ def create_app(
             "voices": len(voice_manager.list_profiles()),
         }
 
+    @app.post("/api/benchmark")
+    async def run_benchmark(
+        text: str = Form(...),
+        voice_id: str = Form(""),
+    ):
+        if not text.strip():
+            raise HTTPException(400, "Text is required")
+
+        from wyoming_chatterbox.benchmark import run_comparative_benchmark
+
+        try:
+            results = await run_comparative_benchmark(
+                engine_mgr, text.strip(), voice_id or None, voice_manager,
+            )
+            return [r.to_dict() for r in results]
+        except Exception as e:
+            _LOGGER.error("Benchmark error: %s", e, exc_info=True)
+            raise HTTPException(500, f"Benchmark failed: {str(e)}")
+
     return app
 
 

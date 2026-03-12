@@ -398,6 +398,51 @@ footer a:hover {
     text-decoration: underline;
 }
 
+/* Benchmark table */
+.bench-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+}
+
+.bench-table th {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--border);
+}
+
+.bench-table td {
+    padding: 0.625rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+
+.bench-table tr:last-child td {
+    border-bottom: none;
+}
+
+.bench-table .rtf-good { color: var(--success); font-weight: 600; }
+.bench-table .rtf-ok { color: #f1c40f; font-weight: 600; }
+.bench-table .rtf-slow { color: var(--danger); font-weight: 600; }
+
+.bench-table .bench-error {
+    color: var(--danger);
+    font-style: italic;
+}
+
+.bench-table audio {
+    height: 32px;
+    width: 160px;
+}
+
+.bench-winner {
+    background: rgba(46, 204, 113, 0.06);
+}
+
 /* Responsive */
 @media (max-width: 640px) {
     .form-row {

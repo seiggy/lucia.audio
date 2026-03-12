@@ -176,6 +176,50 @@
                 </div>
             </form>
         </section>
+
+        <!-- Benchmark -->
+        <section class="card">
+            <h2>⚡ Engine Benchmark</h2>
+            <p class="hint">Run the same text through all available engines and compare performance. Engines are loaded/unloaded as needed.</p>
+            <form id="bench-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="bench-voice">Voice</label>
+                        <select id="bench-voice" name="voice_id">
+                            <option value="">Default</option>
+                            {% for profile in profiles %}
+                            {% if profile.is_ready %}
+                            <option value="{{ profile.id }}">{{ profile.name }}</option>
+                            {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="bench-text">Benchmark Text</label>
+                    <textarea id="bench-text" name="text" rows="2" placeholder="Enter text to benchmark..." required>The quick brown fox jumps over the lazy dog. This sentence tests the speed of each TTS engine.</textarea>
+                </div>
+                <button type="submit" class="btn btn-primary" id="bench-btn">
+                    <span class="btn-text">⚡ Run Benchmark</span>
+                    <span class="btn-loading" style="display:none;">Running benchmark across all engines...</span>
+                </button>
+            </form>
+            <div id="bench-results" style="display:none; margin-top: 1rem;">
+                <table class="bench-table">
+                    <thead>
+                        <tr>
+                            <th>Engine</th>
+                            <th>Total Time</th>
+                            <th>Audio Length</th>
+                            <th>RTF</th>
+                            <th>VRAM Peak</th>
+                            <th>Listen</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bench-tbody"></tbody>
+                </table>
+            </div>
+        </section>
     </main>
 
     <footer>
