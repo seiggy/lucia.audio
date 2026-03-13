@@ -85,6 +85,7 @@ class ChatterboxEventHandler(AsyncEventHandler):
 
         conds_path = None
         audio_path = None
+        profile = None
         if voice_name:
             profile = self.voice_manager.get_profile_by_name(voice_name)
             if profile is None:
@@ -95,24 +96,36 @@ class ChatterboxEventHandler(AsyncEventHandler):
                 _LOGGER.debug("Using voice profile: %s", profile.name)
             else:
                 _LOGGER.warning("Voice '%s' not found or not ready, using default", voice_name)
+                profile = None
 
         if conds_path is None:
             default = self.voice_manager.get_default_voice()
             if default:
                 conds_path = self.voice_manager.get_conds_path(default.id)
                 audio_path = self.voice_manager.get_audio_path(default.id)
+                profile = default
                 _LOGGER.debug("Using default voice: %s", default.name)
+
+        # Build inference kwargs from profile settings
+        inference_kwargs = {}
+        if profile:
+            inference_kwargs = dict(
+                temperature=profile.temperature,
+                top_p=profile.top_p,
+                top_k=profile.top_k,
+                repetition_penalty=profile.repetition_penalty,
+            )
 
         # Try streaming synthesis first, fall back to non-streaming
         try:
-            await self._synthesize_streaming(text, conds_path, audio_path)
+            await self._synthesize_streaming(text, conds_path, audio_path, **inference_kwargs)
         except Exception as stream_err:
             _LOGGER.debug("Streaming not available, falling back to non-streaming: %s", stream_err)
-            await self._synthesize_batch(text, conds_path, audio_path)
+            await self._synthesize_batch(text, conds_path, audio_path, **inference_kwargs)
 
         _LOGGER.info("Synthesis complete for: '%s'", text[:50])
 
-    async def _synthesize_streaming(self, text, conds_path, audio_path):
+    async def _synthesize_streaming(self, text, conds_path, audio_path, **kwargs):
         """Stream audio chunks as they're generated."""
         start_sent = False
 
@@ -120,6 +133,7 @@ class ChatterboxEventHandler(AsyncEventHandler):
             text=text,
             voice_conds_path=conds_path,
             audio_prompt_path=str(audio_path) if audio_path else None,
+            **kwargs,
         ):
             # Convert float32 numpy to 16-bit PCM bytes
             audio_np = np.clip(audio_np.flatten(), -1.0, 1.0)
@@ -148,12 +162,13 @@ class ChatterboxEventHandler(AsyncEventHandler):
         else:
             raise RuntimeError("No audio chunks produced")
 
-    async def _synthesize_batch(self, text, conds_path, audio_path):
+    async def _synthesize_batch(self, text, conds_path, audio_path, **kwargs):
         """Non-streaming fallback: synthesize all at once, then send."""
         wav_bytes = await self.engine_mgr.synthesize(
             text=text,
             voice_conds_path=conds_path,
             audio_prompt_path=str(audio_path) if audio_path else None,
+            **kwargs,
         )
 
         with io.BytesIO(wav_bytes) as wav_io:

@@ -160,6 +160,10 @@ def create_app(
         name: Optional[str] = Form(None),
         description: Optional[str] = Form(None),
         exaggeration: Optional[float] = Form(None),
+        temperature: Optional[float] = Form(None),
+        top_p: Optional[float] = Form(None),
+        top_k: Optional[int] = Form(None),
+        repetition_penalty: Optional[float] = Form(None),
     ):
         profile = voice_manager.get_profile(profile_id)
         if profile is None:
@@ -182,7 +186,20 @@ def create_app(
                     _LOGGER.error("Failed to recompute conditionals: %s", e)
                     raise HTTPException(500, f"Failed to reprocess voice: {str(e)}")
 
-        profile = voice_manager.update_profile(profile_id, name, description, exaggeration)
+        # Clamp inference params
+        if temperature is not None:
+            temperature = max(0.1, min(2.0, temperature))
+        if top_p is not None:
+            top_p = max(0.0, min(1.0, top_p))
+        if top_k is not None:
+            top_k = max(1, min(5000, top_k))
+        if repetition_penalty is not None:
+            repetition_penalty = max(1.0, min(3.0, repetition_penalty))
+
+        profile = voice_manager.update_profile(
+            profile_id, name, description, exaggeration,
+            temperature, top_p, top_k, repetition_penalty,
+        )
         if profile is None:
             raise HTTPException(404, "Voice profile not found")
         _update_wyoming_voices(wyoming_info, voice_manager)
@@ -193,29 +210,34 @@ def create_app(
         text: str = Form(...),
         voice_id: str = Form(""),
         engine_id: str = Form(""),
-        temperature: float = Form(0.8),
-        top_p: float = Form(0.95),
-        top_k: int = Form(1000),
-        repetition_penalty: float = Form(1.2),
     ):
         if not text.strip():
             raise HTTPException(400, "Text is required")
 
-        temperature = max(0.1, min(2.0, temperature))
-        top_p = max(0.0, min(1.0, top_p))
-        top_k = max(1, min(5000, top_k))
-        repetition_penalty = max(1.0, min(3.0, repetition_penalty))
-
+        # Resolve voice and its saved inference params
         conds_path = None
         audio_prompt_path = None
+        inference_kwargs = {}
+
+        profile = None
         if voice_id:
-            conds_path = voice_manager.get_conds_path(voice_id)
-            audio_prompt_path = voice_manager.get_audio_path(voice_id)
-        if conds_path is None:
-            default = voice_manager.get_default_voice()
-            if default:
-                conds_path = voice_manager.get_conds_path(default.id)
-                audio_prompt_path = voice_manager.get_audio_path(default.id)
+            profile = voice_manager.get_profile(voice_id)
+            if profile:
+                conds_path = voice_manager.get_conds_path(voice_id)
+                audio_prompt_path = voice_manager.get_audio_path(voice_id)
+        if profile is None:
+            profile = voice_manager.get_default_voice()
+            if profile:
+                conds_path = voice_manager.get_conds_path(profile.id)
+                audio_prompt_path = voice_manager.get_audio_path(profile.id)
+
+        if profile:
+            inference_kwargs = dict(
+                temperature=profile.temperature,
+                top_p=profile.top_p,
+                top_k=profile.top_k,
+                repetition_penalty=profile.repetition_penalty,
+            )
 
         try:
             wav_bytes = await engine_mgr.synthesize(
@@ -223,10 +245,7 @@ def create_app(
                 engine_id=engine_id or None,
                 voice_conds_path=conds_path,
                 audio_prompt_path=str(audio_prompt_path) if audio_prompt_path else None,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repetition_penalty=repetition_penalty,
+                **inference_kwargs,
             )
             return Response(content=wav_bytes, media_type="audio/wav")
         except Exception as e:

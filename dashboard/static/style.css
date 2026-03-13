@@ -228,17 +228,6 @@ select {
     gap: 0.75rem;
 }
 
-.voice-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    background: var(--bg-input);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    transition: border-color 0.2s;
-}
-
 .voice-card:hover {
     border-color: var(--accent);
 }
@@ -284,6 +273,25 @@ select {
     display: flex;
     gap: 0.5rem;
     flex-shrink: 0;
+}
+
+/* Voice settings panel (expandable per-card) */
+.voice-settings {
+    grid-column: 1 / -1;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    margin-top: 0.75rem;
+}
+
+.voice-card {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: start;
+    padding: 1rem;
+    background: var(--bg-input);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    transition: border-color 0.2s;
 }
 
 .empty-state {

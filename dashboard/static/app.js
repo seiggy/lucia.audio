@@ -300,6 +300,37 @@ function playVoiceRef(id) {
     audio.play();
 }
 
+// Toggle per-profile settings panel
+function toggleProfileSettings(id) {
+    const el = document.getElementById('settings-' + id);
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+// Save per-profile inference settings
+async function saveProfileSettings(id) {
+    const card = document.querySelector(`.voice-card[data-id="${id}"]`);
+    const formData = new FormData();
+    card.querySelectorAll('.voice-settings input[data-param]').forEach(input => {
+        formData.set(input.dataset.param, input.value);
+    });
+
+    try {
+        const resp = await fetch(`/api/voices/${id}`, { method: 'PUT', body: formData });
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || 'Save failed');
+        }
+        // Flash success
+        const btn = card.querySelector('.voice-settings .btn-primary');
+        const orig = btn.textContent;
+        btn.textContent = '✓ Saved!';
+        btn.style.background = 'var(--success)';
+        setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 1500);
+    } catch (err) {
+        alert('Error saving settings: ' + err.message);
+    }
+}
+
 // ─── Engine activation + status ───
 function updateEngineUI(activeId) {
     window.ACTIVE_ENGINE = activeId;

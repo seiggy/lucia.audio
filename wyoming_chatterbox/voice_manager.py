@@ -30,6 +30,11 @@ class VoiceProfile:
     description: str = ""
     is_ready: bool = False  # True once conditionals are computed
     exaggeration: float = 0.5  # emotion intensity, baked into conditionals
+    # Per-profile inference parameters
+    temperature: float = 0.8
+    top_p: float = 0.95
+    top_k: int = 1000
+    repetition_penalty: float = 1.2
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -155,8 +160,17 @@ class VoiceManager:
         _LOGGER.info("Deleted voice profile: %s (%s)", profile.name, profile_id)
         return True
 
-    def update_profile(self, profile_id: str, name: Optional[str] = None, description: Optional[str] = None, exaggeration: Optional[float] = None) -> Optional[VoiceProfile]:
-        """Update profile metadata."""
+    def update_profile(
+        self, profile_id: str,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        exaggeration: Optional[float] = None,
+        temperature: Optional[float] = None,
+        top_p: Optional[float] = None,
+        top_k: Optional[int] = None,
+        repetition_penalty: Optional[float] = None,
+    ) -> Optional[VoiceProfile]:
+        """Update profile metadata and inference parameters."""
         profile = self._profiles.get(profile_id)
         if profile is None:
             return None
@@ -167,6 +181,14 @@ class VoiceManager:
             profile.description = description
         if exaggeration is not None:
             profile.exaggeration = exaggeration
+        if temperature is not None:
+            profile.temperature = temperature
+        if top_p is not None:
+            profile.top_p = top_p
+        if top_k is not None:
+            profile.top_k = top_k
+        if repetition_penalty is not None:
+            profile.repetition_penalty = repetition_penalty
 
         self._save_profile_meta(profile)
         return profile

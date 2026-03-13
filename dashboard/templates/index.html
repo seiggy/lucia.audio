@@ -118,12 +118,38 @@
                         <span class="voice-id">ID: {{ profile.id }}</span>
                     </div>
                     <div class="voice-actions">
-                        <button class="btn btn-sm btn-listen" onclick="playVoiceRef('{{ profile.id }}')" title="Listen to reference">
-                            🔊
-                        </button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteVoice('{{ profile.id }}', '{{ profile.name }}')" title="Delete">
-                            🗑️
-                        </button>
+                        <button class="btn btn-sm" onclick="toggleProfileSettings('{{ profile.id }}')" title="Settings">⚙️</button>
+                        <button class="btn btn-sm btn-listen" onclick="playVoiceRef('{{ profile.id }}')" title="Listen to reference">🔊</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteVoice('{{ profile.id }}', '{{ profile.name }}')" title="Delete">🗑️</button>
+                    </div>
+                    <div class="voice-settings" id="settings-{{ profile.id }}" style="display:none;">
+                        <div class="params-grid">
+                            <div class="form-group">
+                                <label>Temperature <span class="slider-value" id="ptemp-{{ profile.id }}">{{ "%.2f"|format(profile.temperature) }}</span></label>
+                                <input type="range" class="slider" min="0.1" max="2.0" step="0.05" value="{{ profile.temperature }}"
+                                    oninput="document.getElementById('ptemp-{{ profile.id }}').textContent=parseFloat(this.value).toFixed(2)"
+                                    data-profile="{{ profile.id }}" data-param="temperature">
+                            </div>
+                            <div class="form-group">
+                                <label>Top-P <span class="slider-value" id="ptopp-{{ profile.id }}">{{ "%.2f"|format(profile.top_p) }}</span></label>
+                                <input type="range" class="slider" min="0.0" max="1.0" step="0.05" value="{{ profile.top_p }}"
+                                    oninput="document.getElementById('ptopp-{{ profile.id }}').textContent=parseFloat(this.value).toFixed(2)"
+                                    data-profile="{{ profile.id }}" data-param="top_p">
+                            </div>
+                            <div class="form-group">
+                                <label>Top-K <span class="slider-value" id="ptopk-{{ profile.id }}">{{ profile.top_k }}</span></label>
+                                <input type="range" class="slider" min="1" max="5000" step="50" value="{{ profile.top_k }}"
+                                    oninput="document.getElementById('ptopk-{{ profile.id }}').textContent=this.value"
+                                    data-profile="{{ profile.id }}" data-param="top_k">
+                            </div>
+                            <div class="form-group">
+                                <label>Rep. Penalty <span class="slider-value" id="prp-{{ profile.id }}">{{ "%.2f"|format(profile.repetition_penalty) }}</span></label>
+                                <input type="range" class="slider" min="1.0" max="3.0" step="0.05" value="{{ profile.repetition_penalty }}"
+                                    oninput="document.getElementById('prp-{{ profile.id }}').textContent=parseFloat(this.value).toFixed(2)"
+                                    data-profile="{{ profile.id }}" data-param="repetition_penalty">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-primary" style="margin-top:0.5rem;" onclick="saveProfileSettings('{{ profile.id }}')">Save Settings</button>
                     </div>
                 </div>
                 {% endfor %}
@@ -154,31 +180,7 @@
                     <label for="tts-text">Text to Speak</label>
                     <textarea id="tts-text" name="text" rows="3" placeholder="Enter text to synthesize..." required>Hello! This is a test of the Chatterbox Turbo text to speech system.</textarea>
                 </div>
-                <details class="params-panel">
-                    <summary>Inference Parameters</summary>
-                    <div class="params-grid">
-                        <div class="form-group">
-                            <label for="tts-temp">Temperature <span class="slider-value" id="temp-val">0.80</span></label>
-                            <input type="range" id="tts-temp" name="temperature" min="0.1" max="2.0" step="0.05" value="0.8" class="slider" oninput="document.getElementById('temp-val').textContent=parseFloat(this.value).toFixed(2)">
-                            <span class="hint">Higher = more varied/creative, lower = more deterministic.</span>
-                        </div>
-                        <div class="form-group">
-                            <label for="tts-topp">Top-P <span class="slider-value" id="topp-val">0.95</span></label>
-                            <input type="range" id="tts-topp" name="top_p" min="0.0" max="1.0" step="0.05" value="0.95" class="slider" oninput="document.getElementById('topp-val').textContent=parseFloat(this.value).toFixed(2)">
-                            <span class="hint">Nucleus sampling threshold. Lower = more focused.</span>
-                        </div>
-                        <div class="form-group">
-                            <label for="tts-topk">Top-K <span class="slider-value" id="topk-val">1000</span></label>
-                            <input type="range" id="tts-topk" name="top_k" min="1" max="5000" step="50" value="1000" class="slider" oninput="document.getElementById('topk-val').textContent=this.value">
-                            <span class="hint">Number of top tokens considered during sampling.</span>
-                        </div>
-                        <div class="form-group">
-                            <label for="tts-rp">Repetition Penalty <span class="slider-value" id="rp-val">1.20</span></label>
-                            <input type="range" id="tts-rp" name="repetition_penalty" min="1.0" max="3.0" step="0.05" value="1.2" class="slider" oninput="document.getElementById('rp-val').textContent=parseFloat(this.value).toFixed(2)">
-                            <span class="hint">Penalizes repeated tokens. Higher = less repetition.</span>
-                        </div>
-                    </div>
-                </details>
+                <p class="hint">Inference parameters (temperature, top-p, etc.) are configured per voice profile via the ⚙️ button above.</p>
                 <button type="submit" class="btn btn-primary" id="tts-btn">
                     <span class="btn-text">🔊 Synthesize</span>
                     <span class="btn-loading" style="display:none;">Generating audio...</span>
