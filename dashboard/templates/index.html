@@ -58,25 +58,12 @@
                     </div>
                 </div>
                 <div class="form-group chatterbox-only">
-                    <label>Exaggeration Tuning</label>
-                    <div class="exag-tuner">
-                        <div class="form-group" style="margin-bottom: 0.5rem;">
-                            <label for="audition-text" style="text-transform: none; font-size: 0.8125rem;">Sample text for audition</label>
-                            <input type="text" id="audition-text" value="Hello! This is a test of how my voice sounds with different expression levels." style="font-size: 0.8125rem;">
-                        </div>
-                        <button type="button" class="btn btn-primary" id="audition-btn" onclick="runAudition()">
-                            <span class="btn-text">🎭 Audition Exaggeration Levels</span>
-                            <span class="btn-loading" style="display:none;">Generating 5 samples...</span>
-                        </button>
-                        <div id="audition-results" style="display:none; margin-top: 0.75rem;">
-                            <div id="audition-samples"></div>
-                        </div>
-                        <input type="hidden" id="voice-exaggeration" name="exaggeration" value="0.5">
-                    </div>
-                    <span class="hint">Chatterbox only — audition different expression levels before creating the profile.</span>
+                    <label for="voice-exaggeration">Exaggeration <span class="slider-value" id="exag-val">0.50</span></label>
+                    <input type="range" id="voice-exaggeration" name="exaggeration" min="0" max="1" step="0.05" value="0.5" class="slider" oninput="document.getElementById('exag-val').textContent=parseFloat(this.value).toFixed(2)">
+                    <span class="hint">Controls emotion intensity. 0 = neutral, 1 = very expressive.</span>
                 </div>
                 <div class="form-group">
-                    <label>Reference Audio (WAV, 5+ seconds)</label>
+                    <label>Reference Audio (WAV, MP3, OGG, FLAC — 5+ seconds)</label>
                     <div class="audio-source-tabs">
                         <button type="button" class="tab-btn active" data-tab="file">📁 Upload File</button>
                         <button type="button" class="tab-btn" data-tab="mic">🎤 Record from Mic</button>
@@ -96,10 +83,23 @@
                     </div>
                     <audio id="upload-preview" controls style="display:none; margin-top: 0.5rem; width: 100%;"></audio>
                 </div>
-                <button type="submit" class="btn btn-primary" id="upload-btn" style="display:none;">
-                    <span class="btn-text">Upload & Process Voice</span>
-                    <span class="btn-loading" style="display:none;">Processing... (this may take a moment)</span>
-                </button>
+                <div class="form-group chatterbox-only">
+                    <label for="preview-text">Preview Text</label>
+                    <input type="text" id="preview-text" value="Hello! This is a preview of how my voice sounds.">
+                </div>
+                <div style="display:flex; gap:0.75rem; flex-wrap:wrap;">
+                    <button type="button" class="btn btn-primary chatterbox-only" id="preview-btn" onclick="previewVoice()">
+                        <span class="btn-text">🔊 Preview</span>
+                        <span class="btn-loading" style="display:none;">Generating preview...</span>
+                    </button>
+                    <button type="submit" class="btn btn-primary" id="upload-btn">
+                        <span class="btn-text">✓ Create Profile</span>
+                        <span class="btn-loading" style="display:none;">Processing...</span>
+                    </button>
+                </div>
+                <div id="preview-result" style="display:none; margin-top: 0.75rem;">
+                    <audio id="preview-audio" controls style="width: 100%;"></audio>
+                </div>
             </form>
         </section>
 

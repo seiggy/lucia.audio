@@ -350,12 +350,6 @@ function updateEngineUI(activeId) {
     const badge = document.getElementById('engine-status-badge');
     badge.textContent = 'ready';
     badge.dataset.state = 'ready';
-
-    // Show upload button directly for Qwen3 (no audition needed)
-    const uploadBtn = document.getElementById('upload-btn');
-    if (uploadBtn) {
-        uploadBtn.style.display = (activeId === 'qwen3') ? '' : 'none';
-    }
 }
 
 async function activateEngine(engineId) {
@@ -414,23 +408,14 @@ async function activateEngine(engineId) {
 // Initialize engine-specific UI on load
 updateEngineUI(window.ACTIVE_ENGINE);
 
-// ─── Exaggeration Audition Wizard ───
-let selectedExaggeration = 0.5;
-let auditionRound = 0;
-
-async function runAudition() {
-    auditionRound = 0;
-    // Phase 1: coarse sweep
-    await generateAuditionSamples([0.0, 0.25, 0.5, 0.75, 1.0]);
-}
-
-async function generateAuditionSamples(values) {
-    const btn = document.getElementById('audition-btn');
+// ─── Voice Preview ───
+async function previewVoice() {
+    const btn = document.getElementById('preview-btn');
     const btnText = btn.querySelector('.btn-text');
     const btnLoading = btn.querySelector('.btn-loading');
-    const resultsDiv = document.getElementById('audition-results');
-    const samplesDiv = document.getElementById('audition-samples');
     const fileInput = document.getElementById('voice-audio');
+    const resultDiv = document.getElementById('preview-result');
+    const previewAudio = document.getElementById('preview-audio');
 
     if ((!fileInput.files || fileInput.files.length === 0) && !recordedBlob) {
         alert('Please upload audio or record from mic first.');
@@ -439,12 +424,12 @@ async function generateAuditionSamples(values) {
 
     btn.disabled = true;
     btnText.style.display = 'none';
-    btnLoading.textContent = `Generating ${values.length} samples (round ${auditionRound + 1})...`;
     btnLoading.style.display = 'inline';
+    resultDiv.style.display = 'none';
 
     const formData = new FormData();
-    formData.set('text', document.getElementById('audition-text').value);
-    formData.set('values', values.map(v => v.toFixed(2)).join(','));
+    formData.set('text', document.getElementById('preview-text').value);
+    formData.set('values', document.getElementById('voice-exaggeration').value);
 
     if (recordedBlob && (!fileInput.files || fileInput.files.length === 0)) {
         formData.append('audio', recordedBlob, 'recording.wav');
@@ -456,127 +441,24 @@ async function generateAuditionSamples(values) {
         const resp = await fetch('/api/voices/audition', { method: 'POST', body: formData });
         if (!resp.ok) {
             const err = await resp.json();
-            throw new Error(err.detail || 'Audition failed');
+            throw new Error(err.detail || 'Preview failed');
         }
         const results = await resp.json();
-        auditionRound++;
-        renderWizardResults(results, samplesDiv, values);
-        resultsDiv.style.display = 'block';
+        const sample = results.find(r => !r.error);
+        if (sample) {
+            previewAudio.src = 'data:audio/wav;base64,' + sample.audio_b64;
+            resultDiv.style.display = 'block';
+            previewAudio.play();
+        } else {
+            throw new Error(results[0]?.error || 'No audio generated');
+        }
     } catch (err) {
-        alert('Audition error: ' + err.message);
+        alert('Preview error: ' + err.message);
     } finally {
         btn.disabled = false;
         btnText.style.display = 'inline';
         btnLoading.style.display = 'none';
     }
-}
-
-function renderWizardResults(results, container, values) {
-    container.innerHTML = '';
-
-    // Determine step size for refinement check
-    const step = values.length >= 2 ? Math.abs(values[1] - values[0]) : 0;
-    const canRefine = step > 0.05 + 0.001; // can still zoom in
-
-    // Round header
-    const header = document.createElement('div');
-    header.className = 'hint';
-    const range = `${values[0].toFixed(2)} – ${values[values.length-1].toFixed(2)}`;
-    header.innerHTML = canRefine
-        ? `<strong>Round ${auditionRound}:</strong> Listen and pick the best one. We'll zoom in around your choice.`
-        : `<strong>Final round:</strong> Pick your favorite — this will be saved to the voice profile.`;
-    container.appendChild(header);
-
-    for (const r of results) {
-        const div = document.createElement('div');
-        div.className = 'audition-sample';
-
-        if (r.error) {
-            div.innerHTML = `
-                <span class="audition-sample-label">${r.exaggeration.toFixed(2)}</span>
-                <span class="audition-sample-desc" style="color:var(--danger)">Error: ${r.error}</span>
-            `;
-        } else {
-            div.innerHTML = `
-                <span class="audition-sample-label">${r.exaggeration.toFixed(2)}</span>
-                <span class="audition-sample-desc">${getExagDescription(r.exaggeration)}</span>
-                <audio controls src="data:audio/wav;base64,${r.audio_b64}" preload="none"></audio>
-                <button type="button" class="btn btn-sm" style="flex-shrink:0">${canRefine ? '→ Refine' : '✓ Use This'}</button>
-            `;
-            const pickBtn = div.querySelector('button');
-            pickBtn.addEventListener('click', () => {
-                if (canRefine) {
-                    refineAround(r.exaggeration, values);
-                } else {
-                    finalizeExaggeration(r.exaggeration);
-                }
-            });
-            // Also highlight on click (but not on audio/button)
-            div.addEventListener('click', (e) => {
-                if (e.target.tagName === 'AUDIO' || e.target.tagName === 'BUTTON') return;
-                container.querySelectorAll('.audition-sample').forEach(el => el.classList.remove('selected'));
-                div.classList.add('selected');
-            });
-        }
-        container.appendChild(div);
-    }
-}
-
-function refineAround(center, prevValues) {
-    // Find the neighboring values from previous round
-    const sorted = [...prevValues].sort((a, b) => a - b);
-    const idx = sorted.findIndex(v => Math.abs(v - center) < 0.001);
-    const lo = idx > 0 ? sorted[idx - 1] : Math.max(0, center - 0.1);
-    const hi = idx < sorted.length - 1 ? sorted[idx + 1] : Math.min(1, center + 0.1);
-
-    // Generate 5 evenly-spaced values between lo and hi
-    const newValues = [];
-    const range = hi - lo;
-    for (let i = 0; i < 5; i++) {
-        const v = Math.round((lo + (range * i / 4)) * 100) / 100;
-        newValues.push(Math.max(0, Math.min(1, v)));
-    }
-
-    // Deduplicate
-    const unique = [...new Set(newValues)].sort((a, b) => a - b);
-
-    generateAuditionSamples(unique);
-}
-
-function finalizeExaggeration(value) {
-    selectedExaggeration = value;
-    document.getElementById('voice-exaggeration').value = value;
-    // Highlight selection
-    document.querySelectorAll('.audition-sample').forEach(el => {
-        el.classList.remove('selected');
-        const label = el.querySelector('.audition-sample-label');
-        if (label && Math.abs(parseFloat(label.textContent) - value) < 0.001) {
-            el.classList.add('selected');
-        }
-    });
-    // Show upload button
-    document.getElementById('upload-btn').style.display = '';
-    // Show confirmation banner
-    const resultsDiv = document.getElementById('audition-results');
-    let banner = document.getElementById('audition-done');
-    if (!banner) {
-        banner = document.createElement('div');
-        banner.id = 'audition-done';
-        banner.style.cssText = 'margin-top:0.75rem;padding:0.5rem 0.75rem;background:rgba(46,204,113,0.1);border:1px solid rgba(46,204,113,0.3);border-radius:6px;color:var(--success);font-size:0.875rem;';
-        resultsDiv.appendChild(banner);
-    }
-    banner.textContent = `✓ Exaggeration set to ${value.toFixed(2)} — now click "Upload & Process Voice" to create the profile.`;
-}
-
-function getExagDescription(val) {
-    if (val <= 0.05) return 'Flat / neutral';
-    if (val <= 0.15) return 'Very subtle';
-    if (val <= 0.3) return 'Subtle expression';
-    if (val <= 0.45) return 'Mild';
-    if (val <= 0.55) return 'Moderate';
-    if (val <= 0.7) return 'Expressive';
-    if (val <= 0.85) return 'Very expressive';
-    return 'Maximum expression';
 }
 
 // ─── Benchmark ───

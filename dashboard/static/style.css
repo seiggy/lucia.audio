@@ -678,48 +678,6 @@ footer a:hover {
 .chatterbox-only { transition: opacity 0.3s, max-height 0.3s; }
 body.engine-qwen3 .chatterbox-only { opacity: 0.3; pointer-events: none; max-height: 3rem; overflow: hidden; }
 
-/* Audition samples */
-.audition-sample {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-input);
-    border: 2px solid var(--border);
-    border-radius: 6px;
-    margin-bottom: 0.5rem;
-    cursor: pointer;
-    transition: border-color 0.2s;
-}
-
-.audition-sample:hover {
-    border-color: var(--accent);
-}
-
-.audition-sample.selected {
-    border-color: var(--success);
-    background: rgba(46, 204, 113, 0.06);
-}
-
-.audition-sample-label {
-    font-weight: 600;
-    font-size: 0.875rem;
-    min-width: 3.5rem;
-    font-family: 'SF Mono', 'Cascadia Code', monospace;
-}
-
-.audition-sample-desc {
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    flex: 1;
-}
-
-.audition-sample audio {
-    height: 28px;
-    width: 160px;
-    flex-shrink: 0;
-}
-
 /* Audio source tabs */
 .audio-source-tabs {
     display: flex;
